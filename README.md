@@ -177,21 +177,30 @@ service — not xAI's "Grok" — currently has a genuinely free tier with
 generous daily limits on strong open models). Turning it on does two things,
 both handled in `js/groq.js`:
 
-1. **Micro-observation** — after you file a response, one short (≤25 word),
-   concrete, non-diagnostic remark about that single response (a phrasing
-   choice, a distinction drawn). Never personality language, never a verdict
-   on quality.
-2. **Synthesis** — every 8 usable micro-observations, a short hedged
-   paragraph looking for a thread across the recent ones, with the same
-   discipline as the rest of the app: cautious wording, and an explicit
-   statement of what would disconfirm it. If no thread is visible, it says so
-   instead of inventing one.
+1. **Micro-observation** — one short (≤25 word), concrete, non-diagnostic
+   remark about a single response (a phrasing choice, a distinction drawn).
+   Never personality language, never a verdict on quality. This runs
+   automatically right after you file a new response, and you can also ask
+   for it on any **already-filed** response: every card in the **Archive**
+   gets an "Ask AI to weigh in" button once AI Assist is on, plus a
+   one-click "Ask AI to weigh in on all N unreviewed responses" action at
+   the top of the Archive to backfill your whole past history at once.
+   Already-reviewed responses get an "Ask AI again" button if you want a
+   second take.
+2. **Synthesis** — every 8 usable micro-observations (old or new, backfilled
+   or fresh — it doesn't distinguish), a short hedged paragraph looking for
+   a thread across the recent ones, with the same discipline as the rest of
+   the app: cautious wording, and an explicit statement of what would
+   disconfirm it. If no thread is visible, it says so instead of inventing
+   one.
 
 Both are rendered clearly labeled as AI-generated, kept in their own storage
-(the `aiNotes` IndexedDB store) and their own section of the **Discoveries**
-page — separate from, and never mixed into, the deterministic evidence-gated
-discovery engine described above. The structured engine is the source of
-truth; the AI layer is informal commentary.
+(the `aiNotes` IndexedDB store, one row per response, indexed by response id
+so re-asking replaces what's shown without losing the earlier note in
+storage) and their own section of the **Discoveries** page — separate from,
+and never mixed into, the deterministic evidence-gated discovery engine
+described above. The structured engine is the source of truth; the AI layer
+is informal commentary.
 
 **The privacy tradeoff, stated plainly:** turning this on sends the text of
 each response you file (both positions, your third position, your mechanism

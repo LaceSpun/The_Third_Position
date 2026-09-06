@@ -1,6 +1,6 @@
 // Bump this whenever any cached asset changes — it's what forces old
 // clients to drop stale files instead of serving them from cache forever.
-const CACHE_NAME = "third-position-v5";
+const CACHE_NAME = "third-position-v6";
 const ASSETS = [
   "./",
   "index.html",

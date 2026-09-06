@@ -531,8 +531,94 @@ async function renderArchive() {
   searchRow.appendChild(search);
   wrap.appendChild(searchRow);
 
+  // Latest AI note per response, keyed by responseId — built once up front so
+  // draw() can stay synchronous; individual "Ask AI" clicks patch this map
+  // and re-render just that one card's note area.
+  const allNotes = groqIsActive() ? await DB.getAllAINotes() : [];
+  const notesByResponse = new Map();
+  for (const n of allNotes) notesByResponse.set(n.responseId, n);
+
+  if (groqIsActive()) {
+    const unreviewed = responses.filter((r) => !notesByResponse.has(r.id));
+    if (unreviewed.length > 0) {
+      const backfillRow = el("div", { class: "field-row" });
+      const backfillStatus = el("span", { class: "muted small" });
+      const backfillBtn = el("button", {
+        class: "btn secondary",
+        text: `Ask AI to weigh in on all ${unreviewed.length} unreviewed response(s)`,
+        onclick: async () => {
+          backfillBtn.disabled = true;
+          for (let i = 0; i < unreviewed.length; i++) {
+            const r = unreviewed[i];
+            backfillStatus.textContent = `Reviewing ${i + 1} of ${unreviewed.length}…`;
+            const d = dilemmaById(r.dilemmaId);
+            if (d) {
+              const result = await requestMicroObservation(d, r);
+              if (result && !result.error) notesByResponse.set(r.id, result);
+            }
+          }
+          backfillStatus.textContent = "Done.";
+          await maybeSynthesize();
+          draw();
+        },
+      });
+      backfillRow.appendChild(backfillBtn);
+      backfillRow.appendChild(backfillStatus);
+      wrap.appendChild(backfillRow);
+    }
+  }
+
   const list = el("div", { class: "archive-list" });
   wrap.appendChild(list);
+
+  function renderAINoteArea(r, d) {
+    const box = el("div", { class: "ai-note-box" });
+    function fill() {
+      box.innerHTML = "";
+      const current = notesByResponse.get(r.id);
+      if (current) {
+        box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ)" }));
+        box.appendChild(el("p", { text: current.text }));
+        box.appendChild(
+          el("button", {
+            class: "btn secondary",
+            text: "Ask AI again",
+            onclick: async () => {
+              box.innerHTML = "";
+              box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — reading…" }));
+              const result = await requestMicroObservation(d, r);
+              if (result && !result.error) notesByResponse.set(r.id, result);
+              fill();
+              maybeSynthesize();
+            },
+          })
+        );
+      } else {
+        box.appendChild(
+          el("button", {
+            class: "btn secondary",
+            text: "Ask AI to weigh in",
+            onclick: async () => {
+              box.innerHTML = "";
+              box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — reading…" }));
+              const result = await requestMicroObservation(d, r);
+              if (result && !result.error) notesByResponse.set(r.id, result);
+              else if (result && result.error) {
+                box.innerHTML = "";
+                box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — unavailable" }));
+                box.appendChild(el("p", { class: "muted small", text: result.error }));
+                return;
+              }
+              fill();
+              maybeSynthesize();
+            },
+          })
+        );
+      }
+    }
+    fill();
+    return box;
+  }
 
   function draw() {
     list.innerHTML = "";
@@ -558,6 +644,7 @@ async function renderArchive() {
       if (r.difficulty != null) meta.appendChild(el("span", { class: "pill muted-pill", text: `difficulty ${r.difficulty}/5` }));
       card.appendChild(meta);
       if (r.note) card.appendChild(el("p", { class: "archive-note", text: `“${r.note}”` }));
+      if (groqIsActive()) card.appendChild(renderAINoteArea(r, d));
       list.appendChild(card);
     }
     if (!list.children.length) list.appendChild(el("p", { class: "muted", text: "No matches." }));
