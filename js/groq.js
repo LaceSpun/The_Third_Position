@@ -24,7 +24,15 @@
 */
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
-const GROQ_DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models";
+// Groq's model catalog shifts over time (models get renamed, gated, or
+// retired) independent of this app's release cadence. llama-3.1-8b-instant
+// has been the most consistently broadly-available free-tier model; if a
+// request 404s ("does not exist or you do not have access"), that means
+// Groq itself has changed something on their end for this key/account —
+// check GET /openai/v1/models with your key (surfaced in the settings UI)
+// for what's actually available right now, not this hardcoded default.
+const GROQ_DEFAULT_MODEL = "llama-3.1-8b-instant";
 const SYNTHESIS_EVERY_N = 8;
 
 const GROQ_SETTINGS_KEY = "thirdPosition.groqSettings";
@@ -92,6 +100,22 @@ async function callGroq(messages, { model, maxTokens = 200, temperature = 0.4 } 
     const text = data?.choices?.[0]?.message?.content?.trim();
     if (!text) return { ok: false, error: "Groq returned an empty response." };
     return { ok: true, text };
+  } catch (err) {
+    return { ok: false, error: `Network error reaching Groq: ${err.message}` };
+  }
+}
+
+async function listAvailableGroqModels(apiKeyOverride) {
+  const apiKey = (apiKeyOverride || getGroqSettings().apiKey || "").trim();
+  if (!apiKey) return { ok: false, error: "Enter an API key first." };
+  try {
+    const res = await fetch(GROQ_MODELS_URL, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!res.ok) return { ok: false, error: `Groq rejected the request (${res.status}). Check the key.` };
+    const data = await res.json();
+    const ids = (data?.data || []).map((m) => m.id).sort();
+    return { ok: true, ids };
   } catch (err) {
     return { ok: false, error: `Network error reaching Groq: ${err.message}` };
   }

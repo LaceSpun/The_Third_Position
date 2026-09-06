@@ -820,8 +820,36 @@ function renderAIAssistSection() {
   modelRow.appendChild(modelInput);
   section.appendChild(modelRow);
   section.appendChild(
-    el("p", { class: "muted small", text: "Default is llama-3.3-70b-versatile. Any current Groq chat model name works — see console.groq.com/docs/models." })
+    el("p", {
+      class: "muted small",
+      text: `Default is ${GROQ_DEFAULT_MODEL}. Groq's available models change over time independent of this app — use "Check available models" below with your key for the current, authoritative list rather than trusting any hardcoded default.`,
+    })
   );
+
+  const modelListOutput = el("div", { class: "hidden" });
+  section.appendChild(
+    el("button", {
+      class: "btn secondary",
+      text: "Check available models",
+      onclick: async () => {
+        modelListOutput.classList.remove("hidden");
+        modelListOutput.textContent = "Checking…";
+        const keyToUse = keyInput.value.trim() || getGroqSettings().apiKey;
+        if (!keyToUse) {
+          modelListOutput.textContent = "Enter a key above first — it doesn't need to be saved to check it.";
+          return;
+        }
+        const result = await listAvailableGroqModels(keyToUse);
+        if (!result.ok) {
+          modelListOutput.textContent = `Couldn't check: ${result.error}`;
+          return;
+        }
+        modelListOutput.textContent = result.ids.length ? `Available to this key: ${result.ids.join(", ")}` : "Key is valid but returned no models.";
+      },
+    })
+  );
+  modelListOutput.classList.add("muted", "small");
+  section.appendChild(modelListOutput);
 
   const status = el("p", { class: "muted small", text: groqIsActive() ? "Currently active." : "Currently off." });
   section.appendChild(status);
