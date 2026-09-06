@@ -201,8 +201,24 @@ Groq preview model, listed last on purpose since preview models can be
 pulled at short notice) — all defined in `js/groq.js`. Any other failure
 (bad key, network error) stops immediately rather than burning through the
 whole chain. A small note appears whenever a fallback actually answered
-instead of your configured model, so this never happens silently. The
-Model field in settings can be pointed at anything — the fallback chain
+instead of your configured model, so this never happens silently.
+
+These three models are all *reasoning* models — they spend part of their
+token budget "thinking" before writing a final answer, which is different
+from plain instruct models and needs a few things set correctly to avoid
+coming back empty: requests use the current `max_completion_tokens` field
+(not the deprecated `max_tokens`), set `reasoning_effort: "low"` and
+`reasoning_format: "hidden"` on gpt-oss models so only the final answer
+comes back, and use a generous token budget (400/700 tokens for the two
+call types, well above the actual ~25-80 word answer) so reasoning has room
+to finish before the budget runs out. `qwen/qwen3.6-27b` only supports
+`"none"`/`"default"` for `reasoning_effort` (not `"low"`), so that field is
+deliberately left unset on it. Any `<think>...</think>` reasoning that
+leaks into the response text anyway is stripped before display, and a
+truly empty response reports the API's `finish_reason` so the actual cause
+is visible rather than a bare "empty response."
+
+The Model field in settings can be pointed at anything — the fallback chain
 still applies on top of whatever you choose. If your Groq account changes
 its model access again in the future, "Check available models" in the
 settings UI tells you what's actually available right now rather than

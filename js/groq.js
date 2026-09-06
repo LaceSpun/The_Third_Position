@@ -71,10 +71,56 @@ function groqIsActive() {
   return s.enabled && s.apiKey.trim().length > 0;
 }
 
+// openai/gpt-oss-* and qwen/qwen3.6-* are reasoning models: they spend part
+// of the completion budget "thinking" before emitting a final answer. Two
+// things follow from that, both load-bearing for why the first version of
+// this call kept coming back empty:
+//   1. `max_tokens` is the deprecated field name; Groq's current API (like
+//      OpenAI's) expects `max_completion_tokens`. Sending the old field name
+//      risks it being ignored/misapplied on these newer models.
+//   2. With no reasoning controls set, a small token budget can be entirely
+//      consumed by internal reasoning before any visible answer is emitted,
+//      leaving message.content empty — not a network or model-access
+//      failure, just starved of room to finish thinking.
+// Fixed by asking for low reasoning effort and a hidden reasoning channel
+// (only the final answer comes back in content, never the chain-of-thought),
+// giving a generous token budget on top of that, and stripping any <think>
+// tags defensively in case a given model doesn't honor "hidden".
+const GPT_OSS_PATTERN = /^openai\/gpt-oss-/i;
+const QWEN_PATTERN = /^qwen\//i;
+
+function stripReasoningArtifacts(text) {
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  // Safety cap: the requested outputs are always short (~25-80 words). The
+  // message.reasoning fallback above, in particular, could in principle
+  // return much more than that — this keeps a rare edge case from dumping
+  // an unbounded wall of text into a UI built for one or two sentences.
+  return cleaned.length > 600 ? cleaned.slice(0, 600).trim() + "…" : cleaned;
+}
+
 // Single attempt against one specific model. Never throws — every failure
 // path returns { ok: false, status, error } so the fallback chain above it
 // can decide whether trying the next model is worth it.
-async function callGroqOnce(messages, { model, apiKey, maxTokens = 200, temperature = 0.4 }) {
+async function callGroqOnce(messages, { model, apiKey, maxTokens = 350, temperature = 0.4 }) {
+  const body = {
+    model,
+    messages,
+    temperature,
+    max_completion_tokens: maxTokens,
+  };
+  if (GPT_OSS_PATTERN.test(model)) {
+    // gpt-oss 20b/120b accept low/medium/high; "low" is plenty for a
+    // 25-word observation or an 80-word synthesis paragraph.
+    body.reasoning_effort = "low";
+    body.reasoning_format = "hidden";
+  } else if (QWEN_PATTERN.test(model)) {
+    // qwen3.6-27b only accepts "none"/"default" for reasoning_effort (the
+    // low/medium/high scale is qwen3.8-only) — deliberately NOT setting
+    // "low" here, since that would 400 on this model and this is our last
+    // fallback with nowhere further to go.
+    body.reasoning_format = "hidden";
+  }
+
   try {
     const res = await fetch(GROQ_API_URL, {
       method: "POST",
@@ -82,14 +128,14 @@ async function callGroqOnce(messages, { model, apiKey, maxTokens = 200, temperat
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) {
       const status = res.status;
       let detail = "";
       try {
-        const body = await res.json();
-        detail = body?.error?.message || "";
+        const errBody = await res.json();
+        detail = errBody?.error?.message || "";
       } catch {
         /* ignore */
       }
@@ -99,8 +145,17 @@ async function callGroqOnce(messages, { model, apiKey, maxTokens = 200, temperat
       return { ok: false, status, error: `Groq request failed on ${model} (${status}). ${detail}`.trim() };
     }
     const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content?.trim();
-    if (!text) return { ok: false, status: res.status, error: `Groq returned an empty response from ${model}.` };
+    const choice = data?.choices?.[0];
+    const rawText = choice?.message?.content || choice?.message?.reasoning || "";
+    const text = stripReasoningArtifacts(rawText);
+    if (!text) {
+      const reason = choice?.finish_reason ? ` (finish_reason: ${choice.finish_reason})` : "";
+      return {
+        ok: false,
+        status: res.status,
+        error: `Groq returned an empty response from ${model}${reason}. If this keeps happening, try raising the token budget or a different model.`,
+      };
+    }
     return { ok: true, text, modelUsed: model };
   } catch (err) {
     return { ok: false, status: null, error: `Network error reaching Groq: ${err.message}` };
@@ -112,7 +167,7 @@ async function callGroqOnce(messages, { model, apiKey, maxTokens = 200, temperat
 // else (bad key, network failure) is very unlikely to be fixed by switching
 // models, so it stops there and reports immediately instead of burning
 // through every fallback for no reason.
-async function callGroq(messages, { model, maxTokens = 200, temperature = 0.4 } = {}) {
+async function callGroq(messages, { model, maxTokens = 350, temperature = 0.4 } = {}) {
   const settings = getGroqSettings();
   const apiKey = settings.apiKey.trim();
   if (!settings.enabled || !apiKey) return { ok: false, error: "AI assist is not enabled." };
@@ -171,7 +226,11 @@ async function requestMicroObservation(dilemma, response) {
     },
   ];
 
-  const result = await callGroq(messages, { maxTokens: 80, temperature: 0.5 });
+  // Generous relative to the ~25-word answer we actually want: reasoning
+  // models spend part of this budget thinking even with reasoning_effort
+  // "low" and reasoning_format "hidden", so a tight limit here is exactly
+  // what produced empty responses before.
+  const result = await callGroq(messages, { maxTokens: 400, temperature: 0.5 });
   if (!result.ok) return { error: result.error };
 
   const note = {
@@ -230,7 +289,7 @@ async function maybeSynthesize() {
     },
   ];
 
-  const result = await callGroq(messages, { maxTokens: 220, temperature: 0.5 });
+  const result = await callGroq(messages, { maxTokens: 700, temperature: 0.5 });
   if (!result.ok) return { error: result.error };
 
   const entry = {
