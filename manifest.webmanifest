@@ -1,0 +1,14 @@
+{
+  "name": "The Third Position",
+  "short_name": "3rdPosition",
+  "description": "A longitudinal contradiction experiment for discovering how you actually think.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#141310",
+  "theme_color": "#141310",
+  "orientation": "any",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
