@@ -21,6 +21,13 @@
 */
 
 const MILESTONES = [5, 12, 25, 50, 100];
+const MIN_RESPONSES_FOR_DISCOVERY = 5;
+// If enough time has passed since the last check, re-run discovery even if
+// the next count milestone hasn't been hit yet — so a slow trickle of
+// responses still gets revisited, and a burst of responses in one sitting
+// doesn't have to wait until the next big number either.
+const FALLBACK_CHECK_DAYS = 4;
+
 function nextMilestoneSchedule(n) {
   // after 100, unlock every 50
   const arr = [...MILESTONES];
@@ -281,23 +288,108 @@ function computeDiscoveries(responses) {
   return insights;
 }
 
+/*
+  Near misses: cheap, ungated "building evidence" signals — one step short of
+  a real discovery. No confidence claims, no counterexamples, just a count of
+  how close a pattern is to crossing its threshold. Recomputed live on every
+  visit to Discoveries; never persisted, never gated behind a milestone.
+*/
+function computeNearMisses(responses) {
+  const near = [];
+  const enriched = responses.map((r) => ({ r, d: dilemmaById(r.dilemmaId) })).filter((x) => x.d);
+  if (enriched.length === 0) return near;
+
+  const byMech = new Map();
+  for (const { r, d } of enriched) {
+    const key = mechName(r);
+    if (!byMech.has(key)) byMech.set(key, []);
+    byMech.get(key).push({ r, d });
+  }
+  for (const [mechKey, items] of byMech) {
+    const domains = new Set(items.map((x) => x.d.domain));
+    if (items.length >= 2 && items.length < 3 && domains.size >= 2) {
+      const label = mechKey.startsWith("OTHER:") ? mechKey.slice(6) : mechanismLabel(mechKey);
+      near.push({ label: `"${label}" — 2 of 3 seen`, detail: `One more use of this move in a new domain would confirm it as a recurring pattern.` });
+    }
+  }
+
+  const byTwin = new Map();
+  for (const { r, d } of enriched) {
+    if (!d.twinGroup) continue;
+    if (!byTwin.has(d.twinGroup)) byTwin.set(d.twinGroup, new Set());
+    byTwin.get(d.twinGroup).add(d.id);
+  }
+  for (const [twinGroup, ids] of byTwin) {
+    if (ids.size === 1) {
+      near.push({ label: `Twin pending: ${twinGroup.replace("TWIN_", "").replaceAll("_", " ").toLowerCase()}`, detail: `You've answered one side of a structural twin pair. Its counterpart hasn't come up yet.` });
+    }
+  }
+
+  const byFamily = new Map();
+  for (const { r, d } of enriched) {
+    if (!d.family) continue;
+    if (!byFamily.has(d.family)) byFamily.set(d.family, []);
+    byFamily.get(d.family).push({ r, d });
+  }
+  for (const [family, items] of byFamily) {
+    if (items.length === 2) {
+      const mechs = items.map((x) => mechName(x.r));
+      const same = mechs[0] === mechs[1];
+      near.push({
+        label: `${family.replaceAll("_", " ").toLowerCase()} — 2 of 3 seen`,
+        detail: same
+          ? "Both answers so far agree. One more consistent answer would confirm a pattern."
+          : "The two answers so far disagree. A third would tip this toward either a pattern or an open mystery.",
+      });
+    }
+  }
+
+  return near;
+}
+
+function slug(s) {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+function stableDiscoveryId(d) {
+  return `disc__${d.type}__${slug(d.title)}`;
+}
+
 async function checkMilestonesAndMaybeUnlock() {
   const responses = await DB.getAllResponses();
   const n = responses.length;
+  if (n < MIN_RESPONSES_FOR_DISCOVERY) return null;
+
+  const now = Date.now();
+  const lastCount = (await DB.getMeta("lastMilestoneCount", 0)) || 0;
+  const lastCheckAt = (await DB.getMeta("lastDiscoveryCheckAt", 0)) || 0;
+
   const schedule = nextMilestoneSchedule(n);
-  const passed = schedule.filter((m) => m <= n);
-  const lastMilestone = (await DB.getMeta("lastMilestone", 0)) || 0;
-  const newlyPassed = passed.filter((m) => m > lastMilestone);
-  if (newlyPassed.length === 0) return null;
+  const countMilestoneHit = schedule.filter((m) => m > lastCount && m <= n).pop() || null;
+  const daysSinceCheck = lastCheckAt ? (now - lastCheckAt) / (1000 * 60 * 60 * 24) : Infinity;
+  const dueToTime = n > lastCount && daysSinceCheck >= FALLBACK_CHECK_DAYS;
+  const firstEverCheck = lastCheckAt === 0;
+
+  if (!countMilestoneHit && !dueToTime && !firstEverCheck) return null;
 
   const discoveries = computeDiscoveries(responses);
-  const withIds = discoveries.map((d, i) => ({
-    id: `disc_${Date.now()}_${i}`,
-    computedAt: Date.now(),
+  const previous = await DB.getAllDiscoveries();
+  const prevSignature = new Map(previous.map((d) => [stableDiscoveryId(d), d.evidenceCount]));
+
+  const withIds = discoveries.map((d) => ({
+    id: stableDiscoveryId(d),
+    computedAt: now,
     atResponseCount: n,
     ...d,
   }));
   await DB.saveDiscoveries(withIds);
-  await DB.putMeta("lastMilestone", Math.max(...passed));
-  return { milestone: Math.max(...newlyPassed), count: n, discoveries: withIds };
+  await DB.putMeta("lastMilestoneCount", Math.max(lastCount, ...schedule.filter((m) => m <= n), n));
+  await DB.putMeta("lastDiscoveryCheckAt", now);
+
+  // Only surface what's new or has grown since the last time it was shown —
+  // a time-based recheck with nothing changed should stay silent.
+  const newOrGrown = withIds.filter((d) => !prevSignature.has(d.id) || prevSignature.get(d.id) < d.evidenceCount);
+  if (newOrGrown.length === 0) return null;
+
+  return { milestone: countMilestoneHit, count: n, timeBased: !countMilestoneHit, discoveries: newOrGrown };
 }

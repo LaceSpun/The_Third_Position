@@ -37,6 +37,42 @@ function el(tag, attrs = {}, children = []) {
   return e;
 }
 
+function domainSlug(domain) {
+  return domain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+}
+
+// A distinct hue per domain, so the archive, case headers, and pattern lab
+// read as a spectrum rather than one flat color. Picked by hand for contrast
+// against the dark ground, not generated — a hashed hue tends to clash.
+const DOMAIN_COLORS = {
+  "knowledge & evidence": "#c98f3f",
+  "relationships": "#d9736c",
+  "autonomy": "#5fb0c7",
+  "morality": "#b5504a",
+  "creativity": "#c77dd1",
+  "classification": "#8a9a5b",
+  "identity": "#e0a336",
+  "memory": "#7f8fd1",
+  "uncertainty": "#9a8f7a",
+  "decision-making": "#4f9d8a",
+  "social interpretation": "#d18f9e",
+  "responsibility": "#c2703a",
+  "rules & exceptions": "#6d9dc5",
+  "order & spontaneity": "#e0c05c",
+  "emotional reasoning": "#cf6d95",
+  "aesthetics": "#a883d1",
+  "trust": "#7fa88a",
+  "change & continuity": "#c9a86a",
+};
+
+function domainColor(domain) {
+  return DOMAIN_COLORS[domain] || "var(--accent)";
+}
+
+function domainStyleAttr(domain) {
+  return `--dc: ${domainColor(domain)}`;
+}
+
 // ---------- dilemma selection ----------
 
 function daysBetween(a, b) {
@@ -95,7 +131,7 @@ function renderNav() {
   const nav = $("#nav");
   nav.innerHTML = "";
   const items = [
-    ["today", "Today's Contradiction"],
+    ["today", "Contradiction"],
     ["archive", "Archive"],
     ["discoveries", "Discoveries"],
     ["map", "Contradiction Map"],
@@ -133,56 +169,40 @@ async function route() {
 }
 
 // ---------- TODAY ----------
+// There is no daily cap: the app always keeps one dilemma "loaded" and ready
+// (in `pendingDilemmaId`) so you can answer as often as you like in a
+// sitting. What paces the experience is the discovery gate (see
+// discovery.js) and the twin-spacing rule inside pickTodaysDilemma — not a
+// once-a-day lock on the entry point itself.
 
 async function renderToday() {
-  const responses = await DB.getAllResponses();
-  const todayKey = new Date().toDateString();
-
   // Mid-flow: keep showing whatever stage we're on, using the dilemma already
-  // picked for this session (works identically for the normal daily pick and
-  // for an "extra observation" pick — neither depends on the meta-stored id).
+  // picked for this session.
   if ((state.stage === "position" || state.stage === "mechanism") && state.currentDilemma) {
     const dilemma = state.currentDilemma;
     const wrap = el("div", { class: "panel today-panel" });
-    wrap.appendChild(
-      el("div", { class: "case-file-header" }, [
-        el("span", { class: "case-id", text: `SPECIMEN ${dilemma.id.toUpperCase()}` }),
-        el("span", { class: "case-domain", text: dilemma.domain.toUpperCase() }),
-      ])
-    );
+    wrap.appendChild(caseFileHeader(dilemma));
     wrap.appendChild(state.stage === "position" ? renderPositionStage(dilemma) : renderMechanismStage(dilemma));
     return wrap;
   }
 
-  if (state.stage === "done" && state.currentDilemma) {
-    const dilemma = state.currentDilemma;
-    state.stage = "idle"; // next visit to Today re-evaluates from scratch
+  if (state.stage === "done" && state.lastSavedResponse) {
     const wrap = el("div", { class: "panel today-panel" });
-    wrap.appendChild(
-      el("div", { class: "case-file-header" }, [
-        el("span", { class: "case-id", text: `SPECIMEN ${dilemma.id.toUpperCase()}` }),
-        el("span", { class: "case-domain", text: dilemma.domain.toUpperCase() }),
-      ])
-    );
-    wrap.appendChild(renderDoneStage(dilemma));
+    wrap.appendChild(caseFileHeader(state.currentDilemma));
+    wrap.appendChild(await renderDoneStage(state.currentDilemma, state.lastSavedResponse));
     return wrap;
   }
 
-  // Idle: decide whether today's slot is already filled, or start a fresh one.
-  const lastCompleted = await DB.getMeta("lastCompletedDay", null);
-  if (lastCompleted === todayKey) {
-    return renderAlreadyDoneToday(responses.length);
-  }
-
+  // Idle: resume an in-progress pick if the app was closed mid-answer,
+  // otherwise load a fresh one immediately — no waiting required.
+  const responses = await DB.getAllResponses();
   let dilemma;
-  const storedId = await DB.getMeta("currentDilemmaId", null);
-  const storedDay = await DB.getMeta("currentDilemmaDay", null);
-  if (storedId && storedDay === todayKey) {
-    dilemma = dilemmaById(storedId) || pickTodaysDilemma(responses);
+  const pendingId = await DB.getMeta("pendingDilemmaId", null);
+  if (pendingId) {
+    dilemma = dilemmaById(pendingId) || pickTodaysDilemma(responses);
   } else {
     dilemma = pickTodaysDilemma(responses);
-    await DB.putMeta("currentDilemmaId", dilemma.id);
-    await DB.putMeta("currentDilemmaDay", todayKey);
+    await DB.putMeta("pendingDilemmaId", dilemma.id);
   }
 
   state.currentDilemma = dilemma;
@@ -190,39 +210,16 @@ async function renderToday() {
   state.draftThirdPosition = "";
 
   const wrap = el("div", { class: "panel today-panel" });
-  wrap.appendChild(
-    el("div", { class: "case-file-header" }, [
-      el("span", { class: "case-id", text: `SPECIMEN ${dilemma.id.toUpperCase()}` }),
-      el("span", { class: "case-domain", text: dilemma.domain.toUpperCase() }),
-    ])
-  );
+  wrap.appendChild(caseFileHeader(dilemma));
   wrap.appendChild(renderPositionStage(dilemma));
   return wrap;
 }
 
-function renderAlreadyDoneToday(totalCount) {
-  const wrap = el("div", { class: "panel today-panel done-today" });
-  wrap.appendChild(el("h2", { text: "Today's contradiction is filed." }));
-  wrap.appendChild(
-    el("p", {
-      class: "muted",
-      text: `You've logged ${totalCount} response${totalCount === 1 ? "" : "s"} so far. Come back tomorrow for the next one — or, if you want, add an extra observation now.`,
-    })
-  );
-  wrap.appendChild(
-    el("button", {
-      class: "btn secondary",
-      text: "Add an extra observation today",
-      onclick: async () => {
-        const responses = await DB.getAllResponses();
-        state.currentDilemma = pickTodaysDilemma(responses);
-        state.stage = "position";
-        state.draftThirdPosition = "";
-        route();
-      },
-    })
-  );
-  return wrap;
+function caseFileHeader(dilemma) {
+  return el("div", { class: "case-file-header", style: domainStyleAttr(dilemma.domain) }, [
+    el("span", { class: "case-id", text: `SPECIMEN ${dilemma.id.toUpperCase()}` }),
+    el("span", { class: "case-domain", text: dilemma.domain.toUpperCase() }),
+  ]);
 }
 
 function renderPositionStage(dilemma) {
@@ -361,7 +358,7 @@ function renderMechanismStage(dilemma) {
           note: noteInput.value.trim(),
         };
         await DB.addResponse(response);
-        await DB.putMeta("lastCompletedDay", new Date().toDateString());
+        await DB.putMeta("pendingDilemmaId", null);
         state.stage = "done";
         state.lastSavedResponse = response;
         const unlock = await checkMilestonesAndMaybeUnlock();
@@ -375,31 +372,82 @@ function renderMechanismStage(dilemma) {
   return container;
 }
 
-function renderDoneStage(dilemma) {
+async function renderDoneStage(dilemma, response) {
   const wrap = el("div", { class: "done-stage" });
   wrap.appendChild(el("h2", { text: "Filed." }));
-  wrap.appendChild(el("p", { class: "muted", text: "That's today's entry. The pattern this belongs to won't be visible for a while — that's by design." }));
+
+  const responses = await DB.getAllResponses();
+  const mechKey = response.mechanism === "OTHER" ? `OTHER:${(response.mechanismOther || "").trim().toLowerCase()}` : response.mechanism;
+  const sameMechCount = responses.filter((r) => (r.mechanism === "OTHER" ? `OTHER:${(r.mechanismOther || "").trim().toLowerCase()}` : r.mechanism) === mechKey).length;
+  const domainCount = responses.filter((r) => {
+    const d = dilemmaById(r.dilemmaId);
+    return d && d.domain === dilemma.domain;
+  }).length;
+  const mechLabel = response.mechanism === "OTHER" ? response.mechanismOther : mechanismLabel(response.mechanism);
+
+  const tags = el("div", { class: "feedback-tags" });
+  tags.appendChild(el("span", { class: "pill", text: `#${responses.length} logged overall` }));
+  tags.appendChild(
+    el("span", {
+      class: "pill",
+      text: sameMechCount === 1 ? `first time using "${mechLabel}"` : `${ordinal(sameMechCount)} time using "${mechLabel}"`,
+    })
+  );
+  if (domainCount === 1) {
+    tags.appendChild(el("span", { class: "pill muted-pill", text: `first entry in ${dilemma.domain}` }));
+  }
+  wrap.appendChild(tags);
+
   wrap.appendChild(
+    el("p", { class: "muted", text: "The pattern this belongs to won't be fully visible for a while — that's by design. Small counts like these are just bookkeeping, not a conclusion." })
+  );
+
+  const actions = el("div", { class: "done-actions" });
+  actions.appendChild(
+    el("button", {
+      class: "btn primary",
+      text: "Answer another",
+      onclick: async () => {
+        const responses = await DB.getAllResponses();
+        const next = pickTodaysDilemma(responses);
+        await DB.putMeta("pendingDilemmaId", next.id);
+        state.currentDilemma = next;
+        state.stage = "position";
+        state.draftThirdPosition = "";
+        route();
+      },
+    })
+  );
+  actions.appendChild(
     el("button", {
       class: "btn secondary",
-      text: "Back",
+      text: "Stop for now",
       onclick: () => {
+        state.stage = "idle";
         state.view = "archive";
         route();
       },
     })
   );
+  wrap.appendChild(actions);
   return wrap;
+}
+
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 function showUnlockModal(unlock) {
   const overlay = el("div", { class: "modal-overlay" });
   const modal = el("div", { class: "modal" });
-  modal.appendChild(el("div", { class: "modal-header", text: `MILESTONE — ${unlock.milestone} RESPONSES` }));
+  const headerText = unlock.timeBased ? "PERIODIC RECHECK — NEW EVIDENCE" : `MILESTONE — ${unlock.milestone} RESPONSES`;
+  modal.appendChild(el("div", { class: "modal-header", text: headerText }));
   if (unlock.discoveries.length === 0) {
     modal.appendChild(el("p", { text: "No stable pattern has emerged yet. That itself is worth noting — keep going." }));
   } else {
-    modal.appendChild(el("p", { class: "muted", text: `${unlock.discoveries.length} discovery(ies) unlocked:` }));
+    modal.appendChild(el("p", { class: "muted", text: `${unlock.discoveries.length} discovery(ies) unlocked or updated:` }));
     const list = el("div", { class: "discovery-list" });
     for (const d of unlock.discoveries) list.appendChild(renderDiscoveryCard(d));
     modal.appendChild(list);
@@ -442,7 +490,7 @@ async function renderArchive() {
       if (!d) continue;
       const hay = `${d.domain} ${d.positionA} ${d.positionB} ${r.thirdPosition} ${r.note}`.toLowerCase();
       if (q && !hay.includes(q)) continue;
-      const card = el("div", { class: "archive-card" });
+      const card = el("div", { class: "archive-card", style: domainStyleAttr(d.domain) });
       card.appendChild(
         el("div", { class: "archive-card-header" }, [
           el("span", { class: "case-domain", text: d.domain }),
@@ -514,10 +562,24 @@ async function renderDiscoveries() {
   const schedule = nextMilestoneSchedule(responses.length);
   const nextMilestone = schedule.find((m) => m > responses.length);
   wrap.appendChild(
-    el("p", { class: "muted small", text: `${responses.length} responses logged. Next discovery check at ${nextMilestone ?? "—"} responses.` })
+    el("p", {
+      class: "muted small",
+      text: `${responses.length} responses logged. Next check at ${nextMilestone ?? "—"} responses, or sooner if it's been a few days since the last check.`,
+    })
   );
+
+  const nearMisses = computeNearMisses(responses);
+  if (nearMisses.length) {
+    const section = el("div", { class: "near-miss-section" });
+    section.appendChild(el("div", { class: "dg-label", text: "BUILDING EVIDENCE — not yet confirmed" }));
+    for (const nm of nearMisses) {
+      section.appendChild(el("div", { class: "near-miss-item" }, [el("strong", { text: nm.label }), el("p", { text: nm.detail })]));
+    }
+    wrap.appendChild(section);
+  }
+
   if (discoveries.length === 0) {
-    wrap.appendChild(el("p", { class: "muted", text: "Nothing unlocked yet. Discoveries require repeated evidence, not single answers." }));
+    wrap.appendChild(el("p", { class: "muted", text: "Nothing confirmed yet. Discoveries require repeated evidence, not single answers." }));
     return wrap;
   }
   for (const d of discoveries) wrap.appendChild(renderDiscoveryCard(d));
@@ -565,7 +627,7 @@ async function renderPatternLab() {
     const card = el("div", { class: "twin-card" });
     card.appendChild(el("div", { class: "discovery-type", text: twinGroup.replace("TWIN_", "").replaceAll("_", " ") }));
     for (const { r, d } of distinct.values()) {
-      const side = el("div", { class: "twin-side" });
+      const side = el("div", { class: "twin-side", style: domainStyleAttr(d.domain) });
       side.appendChild(el("div", { class: "case-domain", text: d.domain }));
       side.appendChild(el("p", { class: "muted small", text: `A: ${d.positionA}` }));
       side.appendChild(el("p", { class: "muted small", text: `B: ${d.positionB}` }));

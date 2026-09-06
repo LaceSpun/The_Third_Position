@@ -28,9 +28,9 @@ more reliable, especially for the installable/offline behavior).
 On an iPad: open it in Safari, tap Share → "Add to Home Screen" to install it
 as a standalone app. It works fully offline after the first load.
 
-## How the daily flow works
+## How the flow works
 
-1. **Today's Contradiction** shows one dilemma: Position A, Position B, both
+1. **Contradiction** shows one dilemma: Position A, Position B, both
    deliberately defensible.
 2. You write a third position (minimum length enforced, and pure "both are
    partly right"-style non-answers are rejected — you have to name an actual
@@ -40,12 +40,20 @@ as a standalone app. It works fully offline after the first load.
    Feedback Loop, Context, New Variable, Preserve Contradiction, or Other).
 4. Optionally: confidence, difficulty, and a one-line note on why it interested
    or bothered you.
+5. After filing, you land on a "Filed." screen with a couple of cheap,
+   ungated bookkeeping tags (e.g. "3rd time using Condition," "first entry in
+   classification") and two buttons: **Answer another** or **Stop for now**.
 
-One dilemma is presented per day by default (there's an "add an extra
-observation" option if you want to do more). The dilemma bank cycles through
-domains rather than repeating one; once you've seen every dilemma at least
-once, it starts resurfacing older ones, favoring whichever you haven't seen
-in the longest time.
+There is no once-a-day cap — you can answer as many as you want in one
+sitting via "Answer another." What actually paces the experience is the
+discovery gate (below) and the twin-spacing rule: dilemmas that share a
+`twinGroup` are deliberately kept at least ~10 real days apart, however fast
+you're otherwise answering, so structural-twin reveals don't get cheapened
+by speed-running the bank.
+
+The dilemma bank cycles through domains rather than repeating one; once
+you've seen every dilemma at least once, it starts resurfacing older ones,
+favoring whichever you haven't seen in the longest time.
 
 ## Where the dilemma bank lives
 
@@ -121,10 +129,34 @@ explanation of the same data, and what future evidence would disconfirm it.
 Nothing is inferred from a single response except an `OUTLIER`, and that is
 explicitly labeled low-confidence for exactly that reason.
 
-Discoveries are (re)computed and saved at milestones — 5, 12, 25, 50, 100
-responses, then every 50 after that — so the app doesn't nag you with
-constant analysis after every entry. You can always see everything computed
-so far on the **Discoveries** page.
+Discoveries are (re)computed and saved when **either** of two gates trips,
+whichever comes first:
+
+- a response-count milestone — 5, 12, 25, 50, 100, then every 50 after — or
+- at least 4 days have passed since the last check, provided at least one
+  new response came in since then.
+
+The first gate means a burst of answers in one sitting still gets reviewed
+promptly rather than waiting on a big round number that a slow, steady
+trickle of responses might not reach for weeks. The second gate means the
+reverse: even a slow trickle gets revisited every few days rather than
+stalling indefinitely between milestones. A recheck that finds nothing new
+or grown stays silent — you're only interrupted when something actually
+changed. You can always see everything computed so far on the
+**Discoveries** page, which also shows every near-miss short of confirmation
+in a "Building Evidence" section (see below).
+
+### Building Evidence (near misses)
+
+Below the confirmed discoveries, the Discoveries page also shows cheap,
+ungated "one step short" signals — e.g. a mechanism used twice across two
+domains (needs a third to confirm as `OBSERVED_PATTERN`), one side of a
+structural twin pair answered with the other still pending, or a tension
+you've faced exactly twice. These carry no confidence claim and are never
+persisted or milestone-gated — they're recomputed live every time you open
+the page, purely as a "here's what's accumulating" signal so short, frequent
+use still feels like it's visibly building toward something between the
+real, evidence-gated discoveries.
 
 ## Contradiction Map
 
