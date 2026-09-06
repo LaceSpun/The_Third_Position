@@ -99,6 +99,14 @@ function mechanismPill(response) {
   return el("span", { class: "pill", style: `--mc: ${mechanismColor(response.mechanism)}`, text: label });
 }
 
+// If a request quietly fell through to a fallback model, say so — never
+// hide that the configured model wasn't actually the one that answered.
+function aiModelFootnote(modelUsed) {
+  const configured = getGroqSettings().model || GROQ_DEFAULT_MODEL;
+  if (!modelUsed || modelUsed === configured) return null;
+  return el("p", { class: "muted small", text: `(answered by fallback model ${modelUsed} — ${configured} was unavailable)` });
+}
+
 // ---------- dilemma selection ----------
 
 function daysBetween(a, b) {
@@ -450,6 +458,8 @@ async function renderDoneStage(dilemma, response) {
       }
       aiBox.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ)" }));
       aiBox.appendChild(el("p", { text: result.text }));
+      const footnote = aiModelFootnote(result.modelUsed);
+      if (footnote) aiBox.appendChild(footnote);
       maybeSynthesize();
     });
   }
@@ -579,6 +589,8 @@ async function renderArchive() {
       if (current) {
         box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ)" }));
         box.appendChild(el("p", { text: current.text }));
+        const footnote = aiModelFootnote(current.modelUsed);
+        if (footnote) box.appendChild(footnote);
         box.appendChild(
           el("button", {
             class: "btn secondary",
@@ -703,6 +715,8 @@ function renderAISynthesisCard(d) {
       text: `Based on ${d.basedOnCount} recent AI observation(s). This is a language model's read of your writing, not the evidence-gated discovery engine above — treat it as a prompt to notice something, not a finding.`,
     })
   );
+  const footnote = aiModelFootnote(d.modelUsed);
+  if (footnote) card.appendChild(footnote);
   return card;
 }
 
@@ -909,7 +923,7 @@ function renderAIAssistSection() {
   section.appendChild(
     el("p", {
       class: "muted small",
-      text: `Default is ${GROQ_DEFAULT_MODEL}. Groq's available models change over time independent of this app — use "Check available models" below with your key for the current, authoritative list rather than trusting any hardcoded default.`,
+      text: `Default is ${GROQ_DEFAULT_MODEL}. If that model 404s or hits a rate limit, requests automatically fall through to ${GROQ_FALLBACK_MODELS.join(" then ")} before giving up — you'll see a small note when a fallback actually answered. Groq's catalog changes independently of this app, so use "Check available models" below with your key for the current, authoritative list rather than trusting any hardcoded default.`,
     })
   );
 

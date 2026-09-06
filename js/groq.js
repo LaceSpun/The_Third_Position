@@ -26,13 +26,19 @@
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 const GROQ_MODELS_URL = "https://api.groq.com/openai/v1/models";
 // Groq's model catalog shifts over time (models get renamed, gated, or
-// retired) independent of this app's release cadence. llama-3.1-8b-instant
-// has been the most consistently broadly-available free-tier model; if a
-// request 404s ("does not exist or you do not have access"), that means
-// Groq itself has changed something on their end for this key/account —
-// check GET /openai/v1/models with your key (surfaced in the settings UI)
-// for what's actually available right now, not this hardcoded default.
-const GROQ_DEFAULT_MODEL = "llama-3.1-8b-instant";
+// retired) independent of this app's release cadence. If a request 404s
+// ("does not exist or you do not have access"), that means Groq itself has
+// changed something on their end for this key/account — check
+// GET /openai/v1/models with your key (surfaced in the settings UI) for
+// what's actually available right now, not any hardcoded default here.
+const GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b";
+// Tried in order, automatically, whenever the configured/default model
+// fails with a model-access problem (404) or a rate limit (429) — so one
+// model being briefly unavailable doesn't just fail the whole request.
+// qwen/qwen3.6-27b is a Groq *preview* model (can be pulled at short
+// notice per their own docs), which is exactly why it's listed last, not
+// first — it's a safety net, not a default.
+const GROQ_FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.6-27b"];
 const SYNTHESIS_EVERY_N = 8;
 
 const GROQ_SETTINGS_KEY = "thirdPosition.groqSettings";
@@ -65,23 +71,18 @@ function groqIsActive() {
   return s.enabled && s.apiKey.trim().length > 0;
 }
 
-async function callGroq(messages, { model, maxTokens = 200, temperature = 0.4 } = {}) {
-  const settings = getGroqSettings();
-  if (!settings.enabled || !settings.apiKey.trim()) return { ok: false, error: "AI assist is not enabled." };
-
+// Single attempt against one specific model. Never throws — every failure
+// path returns { ok: false, status, error } so the fallback chain above it
+// can decide whether trying the next model is worth it.
+async function callGroqOnce(messages, { model, apiKey, maxTokens = 200, temperature = 0.4 }) {
   try {
     const res = await fetch(GROQ_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${settings.apiKey.trim()}`,
+        Authorization: `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        model: model || settings.model || GROQ_DEFAULT_MODEL,
-        messages,
-        temperature,
-        max_tokens: maxTokens,
-      }),
+      body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens }),
     });
     if (!res.ok) {
       const status = res.status;
@@ -92,17 +93,41 @@ async function callGroq(messages, { model, maxTokens = 200, temperature = 0.4 } 
       } catch {
         /* ignore */
       }
-      if (status === 401) return { ok: false, error: "Groq rejected the API key (401). Check it in Data / Export." };
-      if (status === 429) return { ok: false, error: "Groq rate limit hit — this stays within the free tier's daily/per-minute caps, so it should recover shortly." };
-      return { ok: false, error: `Groq request failed (${status}). ${detail}`.trim() };
+      if (status === 401) return { ok: false, status, error: "Groq rejected the API key (401). Check it in Data / Export." };
+      if (status === 429) return { ok: false, status, error: `Rate limit on ${model} (429) — this stays within the free tier's caps, so it should recover shortly.` };
+      if (status === 404) return { ok: false, status, error: `Model "${model}" is unavailable to this key (404). ${detail}`.trim() };
+      return { ok: false, status, error: `Groq request failed on ${model} (${status}). ${detail}`.trim() };
     }
     const data = await res.json();
     const text = data?.choices?.[0]?.message?.content?.trim();
-    if (!text) return { ok: false, error: "Groq returned an empty response." };
-    return { ok: true, text };
+    if (!text) return { ok: false, status: res.status, error: `Groq returned an empty response from ${model}.` };
+    return { ok: true, text, modelUsed: model };
   } catch (err) {
-    return { ok: false, error: `Network error reaching Groq: ${err.message}` };
+    return { ok: false, status: null, error: `Network error reaching Groq: ${err.message}` };
   }
+}
+
+// Tries the configured model first, then falls through GROQ_FALLBACK_MODELS
+// in order on a model-access problem (404) or rate limit (429) — anything
+// else (bad key, network failure) is very unlikely to be fixed by switching
+// models, so it stops there and reports immediately instead of burning
+// through every fallback for no reason.
+async function callGroq(messages, { model, maxTokens = 200, temperature = 0.4 } = {}) {
+  const settings = getGroqSettings();
+  const apiKey = settings.apiKey.trim();
+  if (!settings.enabled || !apiKey) return { ok: false, error: "AI assist is not enabled." };
+
+  const primary = model || settings.model || GROQ_DEFAULT_MODEL;
+  const chain = [primary, ...GROQ_FALLBACK_MODELS.filter((m) => m !== primary)];
+
+  let lastResult = null;
+  for (const candidate of chain) {
+    const result = await callGroqOnce(messages, { model: candidate, apiKey, maxTokens, temperature });
+    if (result.ok) return result;
+    lastResult = result;
+    if (result.status !== 404 && result.status !== 429) break; // not a model problem — retrying elsewhere won't help
+  }
+  return lastResult;
 }
 
 async function listAvailableGroqModels(apiKeyOverride) {
@@ -154,6 +179,7 @@ async function requestMicroObservation(dilemma, response) {
     responseId: response.id,
     dilemmaId: dilemma.id,
     text: result.text,
+    modelUsed: result.modelUsed,
     createdAt: Date.now(),
   };
   await DB.addAINote(note);
@@ -213,6 +239,7 @@ async function maybeSynthesize() {
     title: "AI synthesis (Groq) — informal, not evidence-gated",
     text: result.text,
     basedOnCount: recent.length,
+    modelUsed: result.modelUsed,
     computedAt: Date.now(),
   };
   await DB.saveDiscoveries([entry]);

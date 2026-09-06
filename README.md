@@ -194,6 +194,20 @@ both handled in `js/groq.js`:
    disconfirm it. If no thread is visible, it says so instead of inventing
    one.
 
+**Model + automatic fallback:** the default is `openai/gpt-oss-120b`. If that
+model 404s (unavailable to your key) or hits a rate limit, requests fall
+through automatically to `openai/gpt-oss-20b`, then `qwen/qwen3.6-27b` (a
+Groq preview model, listed last on purpose since preview models can be
+pulled at short notice) — all defined in `js/groq.js`. Any other failure
+(bad key, network error) stops immediately rather than burning through the
+whole chain. A small note appears whenever a fallback actually answered
+instead of your configured model, so this never happens silently. The
+Model field in settings can be pointed at anything — the fallback chain
+still applies on top of whatever you choose. If your Groq account changes
+its model access again in the future, "Check available models" in the
+settings UI tells you what's actually available right now rather than
+requiring a code update.
+
 Both are rendered clearly labeled as AI-generated, kept in their own storage
 (the `aiNotes` IndexedDB store, one row per response, indexed by response id
 so re-asking replaces what's shown without losing the earlier note in
