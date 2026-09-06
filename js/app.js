@@ -73,6 +73,32 @@ function domainStyleAttr(domain) {
   return `--dc: ${domainColor(domain)}`;
 }
 
+// A distinct hue per mechanism, so the move grid reads as a spectrum of
+// choices rather than one uniform tile repeated twelve times.
+const MECHANISM_COLORS = {
+  CONDITION: "#d79b46",
+  THRESHOLD: "#e0c05c",
+  SEQUENCE: "#4f9d8a",
+  DIFFERENT_LEVELS: "#5fb0c7",
+  DIFFERENT_FUNCTIONS: "#6d9dc5",
+  REVERSIBILITY: "#7fa88a",
+  CONTROL_AGENCY: "#c2703a",
+  FEEDBACK_LOOP: "#8a9a5b",
+  CONTEXT: "#a883d1",
+  NEW_VARIABLE: "#cf6d95",
+  PRESERVE_CONTRADICTION: "#d9736c",
+  OTHER: "#9a8f7a",
+};
+
+function mechanismColor(id) {
+  return MECHANISM_COLORS[id] || "var(--accent)";
+}
+
+function mechanismPill(response) {
+  const label = response.mechanism === "OTHER" ? response.mechanismOther : mechanismLabel(response.mechanism);
+  return el("span", { class: "pill", style: `--mc: ${mechanismColor(response.mechanism)}`, text: label });
+}
+
 // ---------- dilemma selection ----------
 
 function daysBetween(a, b) {
@@ -286,7 +312,10 @@ function renderMechanismStage(dilemma) {
   const grid = el("div", { class: "mechanism-grid" });
   const buttons = [];
   for (const m of MECHANISMS) {
-    const btn = el("button", { class: "mech-btn" }, [el("div", { class: "mech-label", text: m.label }), el("div", { class: "mech-hint", text: m.hint })]);
+    const btn = el("button", { class: "mech-btn", style: `--mc: ${mechanismColor(m.id)}` }, [
+      el("div", { class: "mech-label", text: m.label }),
+      el("div", { class: "mech-hint", text: m.hint }),
+    ]);
     btn.addEventListener("click", () => {
       buttons.forEach((b) => b.classList.remove("selected"));
       btn.classList.add("selected");
@@ -390,6 +419,7 @@ async function renderDoneStage(dilemma, response) {
   tags.appendChild(
     el("span", {
       class: "pill",
+      style: `--mc: ${mechanismColor(response.mechanism)}`,
       text: sameMechCount === 1 ? `first time using "${mechLabel}"` : `${ordinal(sameMechCount)} time using "${mechLabel}"`,
     })
   );
@@ -501,7 +531,7 @@ async function renderArchive() {
       card.appendChild(el("p", { class: "archive-positions", text: `B: ${d.positionB}` }));
       card.appendChild(el("p", { class: "archive-third", text: r.thirdPosition }));
       const meta = el("div", { class: "archive-meta" });
-      meta.appendChild(el("span", { class: "pill", text: r.mechanism === "OTHER" ? r.mechanismOther : mechanismLabel(r.mechanism) }));
+      meta.appendChild(mechanismPill(r));
       if (r.confidence != null) meta.appendChild(el("span", { class: "pill muted-pill", text: `confidence ${r.confidence}` }));
       if (r.difficulty != null) meta.appendChild(el("span", { class: "pill muted-pill", text: `difficulty ${r.difficulty}/5` }));
       card.appendChild(meta);
@@ -632,7 +662,7 @@ async function renderPatternLab() {
       side.appendChild(el("p", { class: "muted small", text: `A: ${d.positionA}` }));
       side.appendChild(el("p", { class: "muted small", text: `B: ${d.positionB}` }));
       side.appendChild(el("p", { class: "archive-third", text: r.thirdPosition }));
-      side.appendChild(el("span", { class: "pill", text: r.mechanism === "OTHER" ? r.mechanismOther : mechanismLabel(r.mechanism) }));
+      side.appendChild(mechanismPill(r));
       card.appendChild(side);
     }
     wrap.appendChild(card);
