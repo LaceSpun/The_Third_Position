@@ -486,6 +486,32 @@ body {
   accent-color: var(--accent-3);
 }
 
+.field-row input[type="checkbox"] {
+  accent-color: var(--accent-2);
+  width: 16px;
+  height: 16px;
+}
+
+.field-row label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.ai-note-box {
+  border: 1px dashed var(--accent-2);
+  border-radius: 5px;
+  padding: 12px 14px;
+  margin: 14px 0;
+  background: linear-gradient(135deg, rgba(79, 157, 138, 0.08), transparent);
+}
+
+.ai-note-box p {
+  margin: 6px 0 0;
+  font-size: 14px;
+  color: var(--ink-bright);
+  font-style: italic;
+}
+
 .field-value {
   min-width: 28px;
   text-align: right;
@@ -663,6 +689,17 @@ body {
 .discovery-card.type-observed_pattern {
   border-left-color: var(--accent);
   background: linear-gradient(90deg, rgba(224, 163, 54, 0.08), var(--bg-inset) 50%);
+}
+.discovery-card.type-ai_synthesis {
+  border-left-style: dashed;
+  border-left-color: var(--accent-2);
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(79, 157, 138, 0.06),
+    rgba(79, 157, 138, 0.06) 10px,
+    transparent 10px,
+    transparent 20px
+  );
 }
 
 .discovery-type {

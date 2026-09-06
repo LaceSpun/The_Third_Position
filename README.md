@@ -168,19 +168,57 @@ simulation is used — positions are computed deterministically
 (`js/map.js`) — so it's not the classic force-directed dance, but it needs no
 dependency and it's easy to reason about what it shows.
 
+## Optional AI Assist (Groq)
+
+Everything above requires zero network access. There is exactly one opt-in
+exception, off by default: under **Data / Export → AI Assist**, you can paste
+in your own [Groq](https://console.groq.com) API key (Groq's cloud inference
+service — not xAI's "Grok" — currently has a genuinely free tier with
+generous daily limits on strong open models). Turning it on does two things,
+both handled in `js/groq.js`:
+
+1. **Micro-observation** — after you file a response, one short (≤25 word),
+   concrete, non-diagnostic remark about that single response (a phrasing
+   choice, a distinction drawn). Never personality language, never a verdict
+   on quality.
+2. **Synthesis** — every 8 usable micro-observations, a short hedged
+   paragraph looking for a thread across the recent ones, with the same
+   discipline as the rest of the app: cautious wording, and an explicit
+   statement of what would disconfirm it. If no thread is visible, it says so
+   instead of inventing one.
+
+Both are rendered clearly labeled as AI-generated, kept in their own storage
+(the `aiNotes` IndexedDB store) and their own section of the **Discoveries**
+page — separate from, and never mixed into, the deterministic evidence-gated
+discovery engine described above. The structured engine is the source of
+truth; the AI layer is informal commentary.
+
+**The privacy tradeoff, stated plainly:** turning this on sends the text of
+each response you file (both positions, your third position, your mechanism
+tag) to Groq's API, using your own key, directly from your browser — there's
+still no backend, so nothing else changes, but your response text does now
+leave the device. Leave it off if you don't want that. The API key and the
+on/off toggle live in `localStorage` (not IndexedDB), are never included in
+JSON export, and are removable any time via "Forget saved key."
+
 ## Data, privacy, and export
 
 - All data is stored locally in this browser's IndexedDB (`js/db.js`). It is
-  never transmitted anywhere — there is no server for it to go to.
+  never transmitted anywhere — there is no server for it to go to — unless
+  you've opted into AI Assist above.
 - **Data / Export** lets you:
-  - export a full JSON backup (responses + computed discoveries)
+  - export a full JSON backup (responses, computed discoveries, AI notes if
+    any, and app metadata — never the Groq key, which stays local to the
+    browser it was entered in)
   - export responses as CSV
   - import a JSON backup (this **replaces** all current local data — you're
     asked to confirm)
   - permanently delete all local data (requires typing `DELETE` to confirm)
 - Because everything is local to one browser profile, a JSON export is also
   your only way to move data between devices or browsers, or to keep a
-  backup outside the browser's storage.
+  backup outside the browser's storage. Note that a JSON export moves your
+  data but not your Groq key — each browser/device needs its own key entered
+  separately if you use AI Assist there too.
 
 ## Project layout
 
@@ -193,6 +231,7 @@ js/db.js                 IndexedDB wrapper
 js/discovery.js          the longitudinal pattern-detection engine
 js/map.js                Contradiction Map rendering (plain SVG)
 js/exportImport.js       JSON/CSV export, JSON import
+js/groq.js               optional, off-by-default AI Assist layer (Groq)
 js/app.js                UI controller, daily-dilemma selection, all views
 manifest.webmanifest     PWA manifest
 service-worker.js        offline caching
@@ -202,7 +241,9 @@ No build tools, no package manager, no dependencies. Open it and it runs.
 
 ## What this deliberately does not do
 
-- No AI, no API calls of any kind, during normal use.
+- No AI, no API calls of any kind, during normal use — the one opt-in,
+  off-by-default exception (Groq-powered AI Assist) is described above and
+  never activates without you pasting in your own key.
 - No login, no account, no cloud sync.
 - No personality score, no single trait label, no "you are an X person."
   If your behavior differs by domain, the app is built to say so plainly

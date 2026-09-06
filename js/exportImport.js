@@ -17,17 +17,22 @@ function downloadBlob(filename, mimeType, content) {
 async function exportJSON() {
   const responses = await DB.getAllResponses();
   const discoveries = await DB.getAllDiscoveries();
-  const lastMilestone = await DB.getMeta("lastMilestone", 0);
+  const aiNotes = await DB.getAllAINotes();
+  const meta = await DB.getAllMeta();
   const payload = {
     app: "the-third-position",
-    exportVersion: 1,
+    exportVersion: 2,
     exportedAt: new Date().toISOString(),
     responses,
     discoveries,
-    meta: [{ key: "lastMilestone", value: lastMilestone }],
+    aiNotes,
+    meta,
   };
   const stamp = new Date().toISOString().slice(0, 10);
   downloadBlob(`third-position-export-${stamp}.json`, "application/json", JSON.stringify(payload, null, 2));
+  // Deliberately excluded: the Groq API key and AI-Assist on/off toggle,
+  // which live in localStorage, not IndexedDB — a backup file should never
+  // carry a credential, and each browser/device needs its own key anyway.
 }
 
 function csvEscape(value) {
@@ -93,6 +98,7 @@ function importJSONFile(file) {
           responses: data.responses,
           discoveries: Array.isArray(data.discoveries) ? data.discoveries : [],
           meta: Array.isArray(data.meta) ? data.meta : [],
+          aiNotes: Array.isArray(data.aiNotes) ? data.aiNotes : [],
         });
         resolve(data.responses.length);
       } catch (err) {

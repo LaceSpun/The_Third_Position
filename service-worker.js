@@ -1,6 +1,6 @@
 // Bump this whenever any cached asset changes — it's what forces old
 // clients to drop stale files instead of serving them from cache forever.
-const CACHE_NAME = "third-position-v3";
+const CACHE_NAME = "third-position-v4";
 const ASSETS = [
   "./",
   "index.html",
@@ -12,6 +12,7 @@ const ASSETS = [
   "js/discovery.js",
   "js/map.js",
   "js/exportImport.js",
+  "js/groq.js",
   "js/app.js",
   "icons/icon.svg",
 ];
@@ -29,6 +30,8 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
+  // POST requests — including every call this app makes to the optional
+  // Groq API — fall through untouched: never cached, always hit the network.
   if (event.request.method !== "GET") return;
   event.respondWith(
     caches.match(event.request).then((cached) => {

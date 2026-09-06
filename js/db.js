@@ -1,7 +1,7 @@
 /* Minimal IndexedDB wrapper. Everything stays on-device. */
 
 const DB_NAME = "third-position-db";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let _dbPromise = null;
 
@@ -21,6 +21,13 @@ function openDB() {
       }
       if (!db.objectStoreNames.contains("discoveries")) {
         db.createObjectStore("discoveries", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("aiNotes")) {
+        // Optional, opt-in AI micro-observations (see js/groq.js). Kept in
+        // their own store so they're trivially excludable from export/import
+        // and never mixed into the deterministic discovery engine's data.
+        const store = db.createObjectStore("aiNotes", { keyPath: "id" });
+        store.createIndex("responseId", "responseId", { unique: false });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -81,6 +88,11 @@ const DB = {
     return rec ? rec.value : fallback;
   },
 
+  async getAllMeta() {
+    const t = await tx(["meta"], "readonly");
+    return reqToPromise(t.objectStore("meta").getAll());
+  },
+
   async saveDiscoveries(discoveries) {
     const t = await tx(["discoveries"], "readwrite");
     const store = t.objectStore("discoveries");
@@ -96,28 +108,48 @@ const DB = {
     return reqToPromise(t.objectStore("discoveries").getAll());
   },
 
+  async addAINote(note) {
+    const t = await tx(["aiNotes"], "readwrite");
+    t.objectStore("aiNotes").add(note);
+    return new Promise((res, rej) => {
+      t.oncomplete = () => res(note);
+      t.onerror = () => rej(t.error);
+    });
+  },
+
+  async getAllAINotes() {
+    const t = await tx(["aiNotes"], "readonly");
+    const all = await reqToPromise(t.objectStore("aiNotes").getAll());
+    all.sort((a, b) => a.createdAt - b.createdAt);
+    return all;
+  },
+
   async clearAll() {
-    const t = await tx(["responses", "meta", "discoveries"], "readwrite");
+    const t = await tx(["responses", "meta", "discoveries", "aiNotes"], "readwrite");
     t.objectStore("responses").clear();
     t.objectStore("meta").clear();
     t.objectStore("discoveries").clear();
+    t.objectStore("aiNotes").clear();
     return new Promise((res, rej) => {
       t.oncomplete = () => res();
       t.onerror = () => rej(t.error);
     });
   },
 
-  async replaceAll({ responses = [], meta = [], discoveries = [] }) {
-    const t = await tx(["responses", "meta", "discoveries"], "readwrite");
+  async replaceAll({ responses = [], meta = [], discoveries = [], aiNotes = [] }) {
+    const t = await tx(["responses", "meta", "discoveries", "aiNotes"], "readwrite");
     const rs = t.objectStore("responses");
     const ms = t.objectStore("meta");
     const ds = t.objectStore("discoveries");
+    const ns = t.objectStore("aiNotes");
     rs.clear();
     ms.clear();
     ds.clear();
+    ns.clear();
     for (const r of responses) rs.put(r);
     for (const m of meta) ms.put(m);
     for (const d of discoveries) ds.put(d);
+    for (const n of aiNotes) ns.put(n);
     return new Promise((res, rej) => {
       t.oncomplete = () => res();
       t.onerror = () => rej(t.error);

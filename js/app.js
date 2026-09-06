@@ -432,6 +432,28 @@ async function renderDoneStage(dilemma, response) {
     el("p", { class: "muted", text: "The pattern this belongs to won't be fully visible for a while — that's by design. Small counts like these are just bookkeeping, not a conclusion." })
   );
 
+  if (groqIsActive()) {
+    const aiBox = el("div", { class: "ai-note-box" }, [
+      el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ) — reading…" }),
+    ]);
+    wrap.appendChild(aiBox);
+    requestMicroObservation(dilemma, response).then((result) => {
+      aiBox.innerHTML = "";
+      if (!result) {
+        aiBox.remove();
+        return;
+      }
+      if (result.error) {
+        aiBox.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — unavailable" }));
+        aiBox.appendChild(el("p", { class: "muted small", text: result.error }));
+        return;
+      }
+      aiBox.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ)" }));
+      aiBox.appendChild(el("p", { text: result.text }));
+      maybeSynthesize();
+    });
+  }
+
   const actions = el("div", { class: "done-actions" });
   actions.appendChild(
     el("button", {
@@ -584,10 +606,25 @@ function renderDiscoveryCard(d) {
   return card;
 }
 
+function renderAISynthesisCard(d) {
+  const card = el("div", { class: "discovery-card type-ai_synthesis" });
+  card.appendChild(el("div", { class: "discovery-type", text: "AI SYNTHESIS · GROQ · INFORMAL" }));
+  card.appendChild(el("p", { class: "discovery-pattern", text: d.text }));
+  card.appendChild(
+    el("p", {
+      class: "discovery-alt",
+      text: `Based on ${d.basedOnCount} recent AI observation(s). This is a language model's read of your writing, not the evidence-gated discovery engine above — treat it as a prompt to notice something, not a finding.`,
+    })
+  );
+  return card;
+}
+
 async function renderDiscoveries() {
   const wrap = el("div", { class: "panel" });
   wrap.appendChild(el("h2", { text: "Discoveries" }));
-  const discoveries = (await DB.getAllDiscoveries()).sort((a, b) => b.computedAt - a.computedAt);
+  const allDiscoveries = (await DB.getAllDiscoveries()).sort((a, b) => b.computedAt - a.computedAt);
+  const discoveries = allDiscoveries.filter((d) => d.type !== "AI_SYNTHESIS");
+  const aiSyntheses = allDiscoveries.filter((d) => d.type === "AI_SYNTHESIS");
   const responses = await DB.getAllResponses();
   const schedule = nextMilestoneSchedule(responses.length);
   const nextMilestone = schedule.find((m) => m > responses.length);
@@ -610,9 +647,16 @@ async function renderDiscoveries() {
 
   if (discoveries.length === 0) {
     wrap.appendChild(el("p", { class: "muted", text: "Nothing confirmed yet. Discoveries require repeated evidence, not single answers." }));
-    return wrap;
+  } else {
+    for (const d of discoveries) wrap.appendChild(renderDiscoveryCard(d));
   }
-  for (const d of discoveries) wrap.appendChild(renderDiscoveryCard(d));
+
+  if (aiSyntheses.length) {
+    wrap.appendChild(el("div", { class: "divider" }));
+    wrap.appendChild(el("h3", { class: "prompt small", text: "AI SYNTHESES (OPTIONAL, OFF BY DEFAULT)" }));
+    for (const d of aiSyntheses) wrap.appendChild(renderAISynthesisCard(d));
+  }
+
   return wrap;
 }
 
@@ -681,7 +725,12 @@ async function renderDataView() {
   const wrap = el("div", { class: "panel" });
   wrap.appendChild(el("h2", { text: "Data / Export" }));
   const responses = await DB.getAllResponses();
-  wrap.appendChild(el("p", { class: "muted", text: `${responses.length} responses stored locally in this browser's IndexedDB. Nothing is ever sent anywhere.` }));
+  wrap.appendChild(
+    el("p", {
+      class: "muted",
+      text: `${responses.length} responses stored locally in this browser's IndexedDB. Nothing is ever sent anywhere, unless you opt into AI Assist below.`,
+    })
+  );
 
   const row = el("div", { class: "data-actions" });
   row.appendChild(el("button", { class: "btn secondary", text: "Export full JSON backup", onclick: exportJSON }));
@@ -723,6 +772,9 @@ async function renderDataView() {
   wrap.appendChild(row);
 
   wrap.appendChild(el("div", { class: "divider" }));
+  wrap.appendChild(renderAIAssistSection());
+
+  wrap.appendChild(el("div", { class: "divider" }));
   wrap.appendChild(el("h3", { text: "Dilemma bank" }));
   wrap.appendChild(
     el("p", {
@@ -732,6 +784,72 @@ async function renderDataView() {
   );
 
   return wrap;
+}
+
+function renderAIAssistSection() {
+  const section = el("div", {});
+  section.appendChild(el("h3", { text: "AI Assist (optional, off by default)" }));
+  section.appendChild(
+    el("p", {
+      class: "warning",
+      text:
+        "Turning this on sends the text of each response you file (both positions, your third position, and your mechanism tag) to Groq's API, using your own key, directly from this browser. Everything else about this app stays local — this is the one exception. Leave it off if you don't want any of your writing to leave this device.",
+    })
+  );
+
+  const settings = getGroqSettings();
+
+  const enableRow = el("div", { class: "field-row" });
+  const enableCheckbox = el("input", { type: "checkbox" });
+  enableCheckbox.checked = settings.enabled;
+  enableRow.appendChild(enableCheckbox);
+  enableRow.appendChild(el("label", { text: "Enable AI micro-observations + periodic synthesis" }));
+  section.appendChild(enableRow);
+
+  const keyRow = el("div", { class: "field-row" });
+  keyRow.appendChild(el("label", { text: "Groq API key" }));
+  const keyInput = el("input", { type: "password", class: "other-input", placeholder: "gsk_…", style: "margin-top:0;flex:1" });
+  keyInput.value = settings.apiKey;
+  keyRow.appendChild(keyInput);
+  section.appendChild(keyRow);
+
+  const modelRow = el("div", { class: "field-row" });
+  modelRow.appendChild(el("label", { text: "Model" }));
+  const modelInput = el("input", { type: "text", class: "other-input", style: "margin-top:0;flex:1" });
+  modelInput.value = settings.model;
+  modelRow.appendChild(modelInput);
+  section.appendChild(modelRow);
+  section.appendChild(
+    el("p", { class: "muted small", text: "Default is llama-3.3-70b-versatile. Any current Groq chat model name works — see console.groq.com/docs/models." })
+  );
+
+  const status = el("p", { class: "muted small", text: groqIsActive() ? "Currently active." : "Currently off." });
+  section.appendChild(status);
+
+  const btnRow = el("div", { class: "data-actions" });
+  btnRow.appendChild(
+    el("button", {
+      class: "btn secondary",
+      text: "Save AI Assist settings",
+      onclick: () => {
+        saveGroqSettings({ enabled: enableCheckbox.checked, apiKey: keyInput.value.trim(), model: modelInput.value.trim() || GROQ_DEFAULT_MODEL });
+        route();
+      },
+    })
+  );
+  btnRow.appendChild(
+    el("button", {
+      class: "btn danger",
+      text: "Forget saved key",
+      onclick: () => {
+        saveGroqSettings({ enabled: false, apiKey: "", model: GROQ_DEFAULT_MODEL });
+        route();
+      },
+    })
+  );
+  section.appendChild(btnRow);
+
+  return section;
 }
 
 // ---------- boot ----------
