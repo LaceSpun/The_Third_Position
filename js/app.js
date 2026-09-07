@@ -1113,9 +1113,44 @@ function renderAIAssistSection() {
 
 // ---------- boot ----------
 
+function showUpdateBanner() {
+  if (document.getElementById("update-banner")) return;
+  const banner = el("div", { id: "update-banner", class: "update-banner" }, [
+    el("span", { text: "A new version of this app is ready." }),
+    el("button", {
+      class: "btn primary",
+      text: "Refresh",
+      onclick: () => location.reload(),
+    }),
+    el("button", {
+      class: "btn secondary",
+      text: "Later",
+      onclick: () => banner.remove(),
+    }),
+  ]);
+  document.body.appendChild(banner);
+}
+
 async function boot() {
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+    navigator.serviceWorker
+      .register("service-worker.js")
+      .then((reg) => {
+        // A worker already controls this page and a NEW one just finished
+        // installing — that's an update, not a first install. Don't force
+        // a reload (you might be mid-way through writing something); show
+        // a banner instead and let the user pick when.
+        reg.addEventListener("updatefound", () => {
+          const incoming = reg.installing;
+          if (!incoming) return;
+          incoming.addEventListener("statechange", () => {
+            if (incoming.state === "installed" && navigator.serviceWorker.controller) {
+              showUpdateBanner();
+            }
+          });
+        });
+      })
+      .catch(() => {});
   }
   route();
 }
