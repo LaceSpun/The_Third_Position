@@ -170,6 +170,7 @@ function renderNav() {
     ["discoveries", "Discoveries"],
     ["map", "Contradiction Map"],
     ["lab", "Pattern Lab"],
+    ["patterncheck", "Pattern Check"],
     ["data", "Data / Export"],
   ];
   for (const [id, label] of items) {
@@ -197,6 +198,7 @@ async function route() {
   else if (state.view === "discoveries") view = await renderDiscoveries();
   else if (state.view === "map") view = await renderMapView();
   else if (state.view === "lab") view = await renderPatternLab();
+  else if (state.view === "patterncheck") view = await renderPatternCheck();
   else if (state.view === "data") view = await renderDataView();
   main.innerHTML = "";
   main.appendChild(view);
@@ -817,6 +819,134 @@ async function renderPatternLab() {
       el("p", { class: "muted", text: "No comparable twin pairs yet. As you answer more dilemmas, structural twins will surface here automatically." })
     );
   }
+  return wrap;
+}
+
+// ---------- PATTERN CHECK ----------
+// A different activity from the daily Contradiction: three stances, two
+// share a real underlying logic, one doesn't — spot the odd one out before
+// writing anything. Diagnosis, not synthesis. See js/patternCheck.js.
+
+function shuffledIndices(n) {
+  const idx = [...Array(n).keys()];
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx;
+}
+
+async function renderPatternCheck() {
+  const wrap = el("div", { class: "panel" });
+  wrap.appendChild(el("h2", { text: "Pattern Check" }));
+  wrap.appendChild(
+    el("p", {
+      class: "muted small",
+      text: "Three stances. Two share a real underlying logic; one doesn't. Spot the odd one out before you write anything.",
+    })
+  );
+
+  const responses = await DB.getAllResponses();
+  const recentKeys = (await DB.getMeta("recentPatternCheckKeys", [])) || [];
+  const triad = pickTriad(responses, recentKeys);
+
+  const puzzleBox = el("div", { class: "triad-box" });
+  wrap.appendChild(puzzleBox);
+
+  function renderPuzzle() {
+    puzzleBox.innerHTML = "";
+    if (triad.source === "self") {
+      puzzleBox.appendChild(el("div", { class: "dg-label", text: "FROM YOUR OWN ARCHIVE — CONTEXT STRIPPED" }));
+    }
+
+    const order = shuffledIndices(3);
+    const buttons = [];
+    let answered = false;
+
+    const optionsWrap = el("div", { class: "triad-options" });
+    order.forEach((canonicalIndex, displayPosition) => {
+      const btn = el("button", { class: "triad-option" }, [el("p", { text: triad.stances[canonicalIndex] })]);
+      btn.addEventListener("click", () => {
+        if (answered) return;
+        answered = true;
+        const correct = canonicalIndex === triad.oddIndex;
+        buttons.forEach((b, i) => {
+          b.disabled = true;
+          if (order[i] === triad.oddIndex && i !== displayPosition) b.classList.add("triad-was-odd");
+        });
+        btn.classList.add(correct ? "triad-correct" : "triad-incorrect");
+
+        const check = {
+          id: `pc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          timestamp: Date.now(),
+          source: triad.source,
+          triadKey: triad.triadKey,
+          chosenIndex: canonicalIndex,
+          oddIndex: triad.oddIndex,
+          correct,
+          sharedLogic: triad.sharedLogic,
+        };
+        DB.addPatternCheck(check);
+        const updatedKeys = [triad.triadKey, ...recentKeys].slice(0, RECENT_TRIAD_KEYS_TO_TRACK);
+        DB.putMeta("recentPatternCheckKeys", updatedKeys);
+
+        const result = el("div", { class: `triad-result ${correct ? "triad-result-correct" : "triad-result-incorrect"}` });
+        result.appendChild(el("div", { class: "dg-label", text: correct ? "CORRECT" : "NOT QUITE" }));
+        result.appendChild(el("p", { text: `Shared logic: ${triad.sharedLogic}.` }));
+        result.appendChild(el("p", { class: "muted small", text: triad.explanation }));
+        puzzleBox.appendChild(result);
+
+        const actions = el("div", { class: "done-actions" });
+        actions.appendChild(
+          el("button", {
+            class: "btn primary",
+            text: "Next puzzle",
+            onclick: () => route(),
+          })
+        );
+        actions.appendChild(
+          el("button", {
+            class: "btn secondary",
+            text: "Turn this into a response",
+            onclick: async () => {
+              let dilemma = null;
+              if (triad.relatedDilemmaId) dilemma = dilemmaById(triad.relatedDilemmaId);
+              if (!dilemma) dilemma = pickTodaysDilemma(await DB.getAllResponses());
+              await DB.putMeta("pendingDilemmaId", dilemma.id);
+              state.currentDilemma = dilemma;
+              state.stage = "position";
+              state.draftThirdPosition = "";
+              state.view = "today";
+              route();
+            },
+          })
+        );
+        puzzleBox.appendChild(actions);
+      });
+      buttons.push(btn);
+      optionsWrap.appendChild(btn);
+    });
+    puzzleBox.appendChild(optionsWrap);
+  }
+
+  renderPuzzle();
+
+  const checks = await DB.getAllPatternChecks();
+  wrap.appendChild(el("div", { class: "divider" }));
+  const statsLine =
+    checks.length === 0
+      ? "No puzzles solved yet."
+      : `${checks.length} puzzle(s) solved, ${Math.round((checks.filter((c) => c.correct).length / checks.length) * 100)}% correct.`;
+  wrap.appendChild(el("p", { class: "muted small", text: statsLine }));
+
+  const modifier = computeAccuracyModifier(checks);
+  if (modifier) {
+    const section = el("div", { class: "near-miss-section" });
+    section.appendChild(el("div", { class: "dg-label", text: "A SMALL PATTERN IN YOUR PATTERN-SPOTTING" }));
+    section.appendChild(el("p", { text: modifier }));
+    wrap.appendChild(section);
+  }
+
   return wrap;
 }
 

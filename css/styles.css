@@ -463,6 +463,88 @@ body {
   color: var(--ink-bright);
 }
 
+.triad-box {
+  margin-top: 8px;
+}
+
+.triad-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.triad-option {
+  text-align: left;
+  background: var(--bg-inset);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent-3);
+  color: var(--ink-bright);
+  padding: 14px 16px;
+  border-radius: 0 4px 4px 0;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.triad-option p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.triad-option:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.triad-option:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.triad-option.triad-correct,
+.triad-option.triad-incorrect {
+  opacity: 1;
+}
+
+.triad-option.triad-correct {
+  border-left-color: var(--accent-2);
+  background: linear-gradient(135deg, rgba(79, 157, 138, 0.18), var(--bg-inset) 60%);
+  box-shadow: 0 0 0 1px var(--accent-2) inset;
+}
+
+.triad-option.triad-incorrect {
+  border-left-color: var(--danger);
+  background: linear-gradient(135deg, rgba(217, 115, 108, 0.18), var(--bg-inset) 60%);
+  box-shadow: 0 0 0 1px var(--danger) inset;
+}
+
+.triad-option.triad-was-odd {
+  border-left-color: var(--accent);
+  opacity: 0.85;
+}
+
+.triad-result {
+  border-radius: 5px;
+  padding: 14px 16px;
+  margin-top: 14px;
+}
+
+.triad-result-correct {
+  border: 1px solid var(--accent-2);
+  background: linear-gradient(135deg, rgba(79, 157, 138, 0.1), transparent);
+}
+
+.triad-result-incorrect {
+  border: 1px solid var(--danger);
+  background: linear-gradient(135deg, rgba(217, 115, 108, 0.1), transparent);
+}
+
+.triad-result p {
+  margin: 6px 0 0;
+  color: var(--ink-bright);
+}
+
 .optional-fields {
   margin-top: 12px;
 }

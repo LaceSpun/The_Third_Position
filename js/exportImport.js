@@ -18,14 +18,16 @@ async function exportJSON() {
   const responses = await DB.getAllResponses();
   const discoveries = await DB.getAllDiscoveries();
   const aiNotes = await DB.getAllAINotes();
+  const patternChecks = await DB.getAllPatternChecks();
   const meta = await DB.getAllMeta();
   const payload = {
     app: "the-third-position",
-    exportVersion: 2,
+    exportVersion: 3,
     exportedAt: new Date().toISOString(),
     responses,
     discoveries,
     aiNotes,
+    patternChecks,
     meta,
   };
   const stamp = new Date().toISOString().slice(0, 10);
@@ -99,6 +101,7 @@ function importJSONFile(file) {
           discoveries: Array.isArray(data.discoveries) ? data.discoveries : [],
           meta: Array.isArray(data.meta) ? data.meta : [],
           aiNotes: Array.isArray(data.aiNotes) ? data.aiNotes : [],
+          patternChecks: Array.isArray(data.patternChecks) ? data.patternChecks : [],
         });
         resolve(data.responses.length);
       } catch (err) {

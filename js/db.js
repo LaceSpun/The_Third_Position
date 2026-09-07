@@ -1,7 +1,7 @@
 /* Minimal IndexedDB wrapper. Everything stays on-device. */
 
 const DB_NAME = "third-position-db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let _dbPromise = null;
 
@@ -28,6 +28,12 @@ function openDB() {
         // and never mixed into the deterministic discovery engine's data.
         const store = db.createObjectStore("aiNotes", { keyPath: "id" });
         store.createIndex("responseId", "responseId", { unique: false });
+      }
+      if (!db.objectStoreNames.contains("patternChecks")) {
+        // "Pattern Check" odd-one-out puzzle attempts (see js/patternCheck.js).
+        // Separate from both responses and discoveries — this is a different
+        // activity (diagnosis, not synthesis) with its own light scoring.
+        db.createObjectStore("patternChecks", { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -124,32 +130,46 @@ const DB = {
     return all;
   },
 
+  async addPatternCheck(check) {
+    const t = await tx(["patternChecks"], "readwrite");
+    t.objectStore("patternChecks").add(check);
+    return new Promise((res, rej) => {
+      t.oncomplete = () => res(check);
+      t.onerror = () => rej(t.error);
+    });
+  },
+
+  async getAllPatternChecks() {
+    const t = await tx(["patternChecks"], "readonly");
+    const all = await reqToPromise(t.objectStore("patternChecks").getAll());
+    all.sort((a, b) => a.timestamp - b.timestamp);
+    return all;
+  },
+
   async clearAll() {
-    const t = await tx(["responses", "meta", "discoveries", "aiNotes"], "readwrite");
-    t.objectStore("responses").clear();
-    t.objectStore("meta").clear();
-    t.objectStore("discoveries").clear();
-    t.objectStore("aiNotes").clear();
+    const stores = ["responses", "meta", "discoveries", "aiNotes", "patternChecks"];
+    const t = await tx(stores, "readwrite");
+    for (const s of stores) t.objectStore(s).clear();
     return new Promise((res, rej) => {
       t.oncomplete = () => res();
       t.onerror = () => rej(t.error);
     });
   },
 
-  async replaceAll({ responses = [], meta = [], discoveries = [], aiNotes = [] }) {
-    const t = await tx(["responses", "meta", "discoveries", "aiNotes"], "readwrite");
+  async replaceAll({ responses = [], meta = [], discoveries = [], aiNotes = [], patternChecks = [] }) {
+    const stores = ["responses", "meta", "discoveries", "aiNotes", "patternChecks"];
+    const t = await tx(stores, "readwrite");
     const rs = t.objectStore("responses");
     const ms = t.objectStore("meta");
     const ds = t.objectStore("discoveries");
     const ns = t.objectStore("aiNotes");
-    rs.clear();
-    ms.clear();
-    ds.clear();
-    ns.clear();
+    const ps = t.objectStore("patternChecks");
+    for (const s of stores) t.objectStore(s).clear();
     for (const r of responses) rs.put(r);
     for (const m of meta) ms.put(m);
     for (const d of discoveries) ds.put(d);
     for (const n of aiNotes) ns.put(n);
+    for (const p of patternChecks) ps.put(p);
     return new Promise((res, rej) => {
       t.oncomplete = () => res();
       t.onerror = () => rej(t.error);

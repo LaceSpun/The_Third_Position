@@ -168,6 +168,42 @@ simulation is used — positions are computed deterministically
 (`js/map.js`) — so it's not the classic force-directed dance, but it needs no
 dependency and it's easy to reason about what it shows.
 
+## Pattern Check
+
+A second, different activity from the daily Contradiction flow — diagnosis
+instead of synthesis. You're shown three short stances; two secretly share a
+real underlying logic, one doesn't. The task is to spot the odd one out
+*before* writing anything. It lives in its own nav tab, on its own schedule —
+it doesn't gate or get gated by the daily dilemma's pacing.
+
+**Content is hybrid** (`js/patternCheck.js`):
+- Once your own Archive has at least two responses sharing a self-tagged
+  mechanism *and* at least one response tagged differently, the app can build
+  a triad straight from your own past answers — two `thirdPosition` texts
+  from the shared-mechanism group, one from outside it, all stripped of
+  domain/positions/mechanism labels so it's genuinely blind. When eligible,
+  this is preferred (~70% of the time) over the authored bank.
+- Otherwise — or the other ~30% of the time — a triad comes from the authored
+  bank in `js/oddOneOut.js` (18 to start, spanning intent-vs-outcome,
+  rule-vs-exception, loyalty-vs-truth, and more of the same structural-family
+  thinking the dilemma bank uses). Same self-service model as the dilemma
+  bank: append an entry with a unique `id`, three `stances`, an `oddIndex`,
+  and a `sharedLogic` label — nothing else to wire up.
+
+**After the pick:** a correct/incorrect reveal plus the shared logic and a
+one-line explanation — that's it by default, a quick standalone diagnosis
+that doesn't touch responses or the discovery engine. Every attempt is logged
+(`patternChecks` IndexedDB store) toward two things:
+- **Next puzzle**, or **turn this into a response** — routes into the normal
+  position → mechanism → file flow (for an authored triad, on the dilemma its
+  `relatedDilemmaId` points to; otherwise a fresh dilemma pick), producing a
+  real logged response like the main flow does.
+- Once you've solved at least 10 puzzles, a small cautious "modifier" line
+  appears — overall accuracy, and, if one `sharedLogic` category has enough
+  attempts and a meaningfully lower hit rate, a note about it. Same hedging
+  discipline as `discovery.js`: evidence count stated, no "you are" language,
+  gated behind a minimum sample size.
+
 ## Optional AI Assist (Groq)
 
 Everything above requires zero network access. There is exactly one opt-in
@@ -246,9 +282,9 @@ JSON export, and are removable any time via "Forget saved key."
   never transmitted anywhere — there is no server for it to go to — unless
   you've opted into AI Assist above.
 - **Data / Export** lets you:
-  - export a full JSON backup (responses, computed discoveries, AI notes if
-    any, and app metadata — never the Groq key, which stays local to the
-    browser it was entered in)
+  - export a full JSON backup (responses, computed discoveries, AI notes and
+    Pattern Check attempts if any, and app metadata — never the Groq key,
+    which stays local to the browser it was entered in)
   - export responses as CSV
   - import a JSON backup (this **replaces** all current local data — you're
     asked to confirm)
@@ -271,6 +307,8 @@ js/discovery.js          the longitudinal pattern-detection engine
 js/map.js                Contradiction Map rendering (plain SVG)
 js/exportImport.js       JSON/CSV export, JSON import
 js/groq.js               optional, off-by-default AI Assist layer (Groq)
+js/oddOneOut.js          Pattern Check's authored triad bank (edit to add triads)
+js/patternCheck.js       Pattern Check selection + scoring logic
 js/app.js                UI controller, daily-dilemma selection, all views
 manifest.webmanifest     PWA manifest
 service-worker.js        offline caching
