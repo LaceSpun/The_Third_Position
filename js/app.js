@@ -836,13 +836,15 @@ function shuffledIndices(n) {
   return idx;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
 async function renderPatternCheck() {
   const wrap = el("div", { class: "panel" });
   wrap.appendChild(el("h2", { text: "Pattern Check" }));
   wrap.appendChild(
     el("p", {
       class: "muted small",
-      text: "Three stances. Two share a real underlying logic; one doesn't. Spot the odd one out before you write anything.",
+      text: "Three stances, pinned loosely. Two share a real underlying logic. Tap those two to connect them with a string — whichever one is left over is the odd one out.",
     })
   );
 
@@ -859,74 +861,107 @@ async function renderPatternCheck() {
       puzzleBox.appendChild(el("div", { class: "dg-label", text: "FROM YOUR OWN ARCHIVE — CONTEXT STRIPPED" }));
     }
 
+    const board = el("div", { class: "triad-board" });
+    const svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("class", "triad-connector-svg");
+    board.appendChild(svg);
+
     const order = shuffledIndices(3);
-    const buttons = [];
+    const cards = [];
+    let selected = [];
     let answered = false;
 
-    const optionsWrap = el("div", { class: "triad-options" });
-    order.forEach((canonicalIndex, displayPosition) => {
-      const btn = el("button", { class: "triad-option" }, [el("p", { text: triad.stances[canonicalIndex] })]);
-      btn.addEventListener("click", () => {
+    function drawString(color) {
+      if (selected.length !== 2) return;
+      const boardRect = board.getBoundingClientRect();
+      const [c1, c2] = selected;
+      const r1 = c1.getBoundingClientRect();
+      const r2 = c2.getBoundingClientRect();
+      const line = document.createElementNS(SVG_NS, "line");
+      line.setAttribute("x1", r1.left + r1.width / 2 - boardRect.left);
+      line.setAttribute("y1", r1.top + r1.height / 2 - boardRect.top);
+      line.setAttribute("x2", r2.left + r2.width / 2 - boardRect.left);
+      line.setAttribute("y2", r2.top + r2.height / 2 - boardRect.top);
+      line.setAttribute("class", "triad-string");
+      line.style.stroke = color;
+      svg.appendChild(line);
+    }
+
+    function commitPair() {
+      answered = true;
+      const selectedCanonical = selected.map((c) => Number(c.dataset.canonical));
+      const unselectedCard = cards.find((c) => !selected.includes(c));
+      const unselectedCanonical = Number(unselectedCard.dataset.canonical);
+      const correct = unselectedCanonical === triad.oddIndex;
+
+      cards.forEach((c) => c.classList.add("triad-disabled"));
+      selected.forEach((c) => c.classList.add(correct ? "triad-pair-correct" : "triad-pair-incorrect"));
+      const trueOddCard = cards.find((c) => Number(c.dataset.canonical) === triad.oddIndex);
+      if (trueOddCard) trueOddCard.classList.add("triad-outlier-reveal");
+      drawString(correct ? "var(--accent-2)" : "var(--danger)");
+
+      const check = {
+        id: `pc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: Date.now(),
+        source: triad.source,
+        triadKey: triad.triadKey,
+        chosenIndex: unselectedCanonical,
+        oddIndex: triad.oddIndex,
+        correct,
+        sharedLogic: triad.sharedLogic,
+      };
+      DB.addPatternCheck(check);
+      const updatedKeys = [triad.triadKey, ...recentKeys].slice(0, RECENT_TRIAD_KEYS_TO_TRACK);
+      DB.putMeta("recentPatternCheckKeys", updatedKeys);
+
+      const result = el("div", { class: `triad-result ${correct ? "triad-result-correct" : "triad-result-incorrect"}` });
+      result.appendChild(el("div", { class: "dg-label", text: correct ? "CONNECTED CORRECTLY" : "NOT QUITE" }));
+      result.appendChild(el("p", { text: `Shared logic: ${triad.sharedLogic}.` }));
+      result.appendChild(el("p", { class: "muted small", text: triad.explanation }));
+      puzzleBox.appendChild(result);
+
+      const actions = el("div", { class: "done-actions" });
+      actions.appendChild(el("button", { class: "btn primary", text: "Next puzzle", onclick: () => route() }));
+      actions.appendChild(
+        el("button", {
+          class: "btn secondary",
+          text: "Turn this into a response",
+          onclick: async () => {
+            let dilemma = null;
+            if (triad.relatedDilemmaId) dilemma = dilemmaById(triad.relatedDilemmaId);
+            if (!dilemma) dilemma = pickTodaysDilemma(await DB.getAllResponses());
+            await DB.putMeta("pendingDilemmaId", dilemma.id);
+            state.currentDilemma = dilemma;
+            state.stage = "position";
+            state.draftThirdPosition = "";
+            state.view = "today";
+            route();
+          },
+        })
+      );
+      puzzleBox.appendChild(actions);
+    }
+
+    order.forEach((canonicalIndex) => {
+      const card = el("div", { class: "triad-card" }, [el("p", { text: triad.stances[canonicalIndex] })]);
+      card.dataset.canonical = canonicalIndex;
+      card.addEventListener("click", () => {
         if (answered) return;
-        answered = true;
-        const correct = canonicalIndex === triad.oddIndex;
-        buttons.forEach((b, i) => {
-          b.disabled = true;
-          if (order[i] === triad.oddIndex && i !== displayPosition) b.classList.add("triad-was-odd");
-        });
-        btn.classList.add(correct ? "triad-correct" : "triad-incorrect");
-
-        const check = {
-          id: `pc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          timestamp: Date.now(),
-          source: triad.source,
-          triadKey: triad.triadKey,
-          chosenIndex: canonicalIndex,
-          oddIndex: triad.oddIndex,
-          correct,
-          sharedLogic: triad.sharedLogic,
-        };
-        DB.addPatternCheck(check);
-        const updatedKeys = [triad.triadKey, ...recentKeys].slice(0, RECENT_TRIAD_KEYS_TO_TRACK);
-        DB.putMeta("recentPatternCheckKeys", updatedKeys);
-
-        const result = el("div", { class: `triad-result ${correct ? "triad-result-correct" : "triad-result-incorrect"}` });
-        result.appendChild(el("div", { class: "dg-label", text: correct ? "CORRECT" : "NOT QUITE" }));
-        result.appendChild(el("p", { text: `Shared logic: ${triad.sharedLogic}.` }));
-        result.appendChild(el("p", { class: "muted small", text: triad.explanation }));
-        puzzleBox.appendChild(result);
-
-        const actions = el("div", { class: "done-actions" });
-        actions.appendChild(
-          el("button", {
-            class: "btn primary",
-            text: "Next puzzle",
-            onclick: () => route(),
-          })
-        );
-        actions.appendChild(
-          el("button", {
-            class: "btn secondary",
-            text: "Turn this into a response",
-            onclick: async () => {
-              let dilemma = null;
-              if (triad.relatedDilemmaId) dilemma = dilemmaById(triad.relatedDilemmaId);
-              if (!dilemma) dilemma = pickTodaysDilemma(await DB.getAllResponses());
-              await DB.putMeta("pendingDilemmaId", dilemma.id);
-              state.currentDilemma = dilemma;
-              state.stage = "position";
-              state.draftThirdPosition = "";
-              state.view = "today";
-              route();
-            },
-          })
-        );
-        puzzleBox.appendChild(actions);
+        if (selected.includes(card)) {
+          selected = selected.filter((c) => c !== card);
+          card.classList.remove("triad-selected");
+          return;
+        }
+        if (selected.length >= 2) return;
+        selected.push(card);
+        card.classList.add("triad-selected");
+        if (selected.length === 2) commitPair();
       });
-      buttons.push(btn);
-      optionsWrap.appendChild(btn);
+      cards.push(card);
+      board.appendChild(card);
     });
-    puzzleBox.appendChild(optionsWrap);
+
+    puzzleBox.appendChild(board);
   }
 
   renderPuzzle();

@@ -170,11 +170,14 @@ dependency and it's easy to reason about what it shows.
 
 ## Pattern Check
 
-A second, different activity from the daily Contradiction flow — diagnosis
-instead of synthesis. You're shown three short stances; two secretly share a
-real underlying logic, one doesn't. The task is to spot the odd one out
-*before* writing anything. It lives in its own nav tab, on its own schedule —
-it doesn't gate or get gated by the daily dilemma's pacing.
+A second, deliberately different activity from the daily Contradiction flow —
+diagnosis instead of synthesis, and a different interaction shape on purpose
+so it doesn't just feel like the same task with different text. Three short
+stances appear as loosely pinned cards, not a stacked list. Two secretly
+share a real underlying logic; you tap those two to connect them with a
+string — the one left over is the odd one out. It lives in its own nav tab,
+on its own schedule — it doesn't gate or get gated by the daily dilemma's
+pacing.
 
 **Content is hybrid** (`js/patternCheck.js`):
 - Once your own Archive has at least two responses sharing a self-tagged
