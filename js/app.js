@@ -447,6 +447,8 @@ async function renderDataView() {
 
   wrap.appendChild(row);
   wrap.appendChild(el("div", { class: "divider" }));
+  wrap.appendChild(renderAppearanceSection());
+  wrap.appendChild(el("div", { class: "divider" }));
   wrap.appendChild(renderAIAssistSection());
   wrap.appendChild(el("div", { class: "divider" }));
   wrap.appendChild(el("h3", { text: "Offline fallback bank" }));
@@ -455,6 +457,105 @@ async function renderDataView() {
   );
 
   return wrap;
+}
+
+function renderAppearanceSection() {
+  const section = el("div", {});
+  section.appendChild(el("h3", { text: "Appearance" }));
+
+  const settings = getThemeSettings();
+  const resolved = resolveMode(settings.mode);
+
+  const modeRow = el("div", { class: "field-row" });
+  modeRow.appendChild(el("label", { text: "Mode" }));
+  const modeSelect = el("select", { class: "other-input", style: "margin-top:0" });
+  for (const [val, label] of [
+    ["dark", "Dark"],
+    ["light", "Light"],
+    ["auto", "Auto (match system)"],
+  ]) {
+    const opt = el("option", { value: val, text: label });
+    if (settings.mode === val) opt.selected = true;
+    modeSelect.appendChild(opt);
+  }
+  modeSelect.addEventListener("change", () => {
+    saveThemeSettings({ ...getThemeSettings(), mode: modeSelect.value });
+    applyTheme();
+    updateThemeToggleButton();
+    route();
+  });
+  modeRow.appendChild(modeSelect);
+  section.appendChild(modeRow);
+
+  section.appendChild(
+    el("p", {
+      class: "muted small",
+      text: "Palette is independent of mode — each preset below has its own dark and light variant, so switching modes never resets your color choice.",
+    })
+  );
+
+  const paletteRow = el("div", { class: "palette-row" });
+  for (const [id, preset] of Object.entries(PALETTES)) {
+    const isCustom = id === "custom";
+    const swatchColors = isCustom
+      ? settings.customColors
+        ? [settings.customColors.accent, settings.customColors.accent2, settings.customColors.accent3]
+        : ["#999", "#999", "#999"]
+      : [preset[resolved].accent, preset[resolved].accent2, preset[resolved].accent3];
+    const dots = el(
+      "span",
+      { class: "palette-swatch-dots" },
+      swatchColors.map((c) => el("span", { style: `background:${c}` }))
+    );
+    paletteRow.appendChild(
+      el(
+        "button",
+        {
+          class: "palette-swatch" + (settings.paletteId === id ? " active" : ""),
+          onclick: () => {
+            const current = getThemeSettings();
+            let customColors = current.customColors;
+            if (isCustom && !customColors) {
+              const seedPreset = current.paletteId !== "custom" && PALETTES[current.paletteId] ? PALETTES[current.paletteId] : PALETTES.lab;
+              customColors = { ...seedPreset[resolveMode(current.mode)] };
+            }
+            saveThemeSettings({ ...current, paletteId: id, customColors });
+            applyTheme();
+            route();
+          },
+        },
+        [dots, preset.label]
+      )
+    );
+  }
+  section.appendChild(paletteRow);
+
+  if (settings.paletteId === "custom") {
+    const colors = settings.customColors || PALETTES.lab[resolved];
+    const fieldsWrap = el("div", { class: "custom-color-row" });
+    for (const [key, label] of [
+      ["accent", "Accent"],
+      ["accent2", "Accent 2"],
+      ["accent3", "Accent 3"],
+      ["danger", "Danger"],
+    ]) {
+      const field = el("div", { class: "custom-color-field" });
+      field.appendChild(el("label", { text: label }));
+      const input = el("input", { type: "color" });
+      input.value = colors[key];
+      input.addEventListener("input", () => {
+        const current = getThemeSettings();
+        const updated = { ...(current.customColors || colors), [key]: input.value };
+        saveThemeSettings({ ...current, paletteId: "custom", customColors: updated });
+        applyTheme();
+      });
+      field.appendChild(input);
+      fieldsWrap.appendChild(field);
+    }
+    section.appendChild(fieldsWrap);
+  }
+
+  return section;
 }
 
 function renderAIAssistSection() {
@@ -551,6 +652,24 @@ function renderAIAssistSection() {
   return section;
 }
 
+// ---------- theme toggle ----------
+
+function updateThemeToggleButton() {
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  const resolved = document.documentElement.getAttribute("data-theme") || "dark";
+  btn.textContent = resolved === "light" ? "☀" : "☾";
+  btn.title = resolved === "light" ? "Switch to dark mode" : "Switch to light mode";
+}
+
+function toggleThemeMode() {
+  const settings = getThemeSettings();
+  const resolved = resolveMode(settings.mode);
+  saveThemeSettings({ ...settings, mode: resolved === "light" ? "dark" : "light" });
+  applyTheme();
+  updateThemeToggleButton();
+}
+
 // ---------- boot ----------
 
 function showUpdateBanner() {
@@ -564,6 +683,10 @@ function showUpdateBanner() {
 }
 
 async function boot() {
+  updateThemeToggleButton();
+  const themeToggle = document.getElementById("theme-toggle");
+  if (themeToggle) themeToggle.addEventListener("click", toggleThemeMode);
+
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker
       .register("service-worker.js")

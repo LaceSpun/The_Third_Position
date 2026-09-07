@@ -1,11 +1,12 @@
 // Bump this whenever any cached asset changes — it's what forces old
 // clients to drop stale files instead of serving them from cache forever.
-const CACHE_NAME = "third-position-v13";
+const CACHE_NAME = "third-position-v14";
 const ASSETS = [
   "./",
   "index.html",
   "manifest.webmanifest",
   "css/styles.css",
+  "js/theme.js",
   "js/db.js",
   "js/exportImport.js",
   "js/groq.js",

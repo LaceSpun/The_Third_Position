@@ -9,6 +9,7 @@
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="icons/icon.svg" />
   <link rel="stylesheet" href="css/styles.css" />
+  <script src="js/theme.js"></script>
 </head>
 <body>
   <header class="app-header">
@@ -19,7 +20,10 @@
         <p class="tagline">a longitudinal pattern-recognition experiment</p>
       </div>
     </div>
-    <nav id="nav" class="nav"></nav>
+    <div class="header-actions">
+      <nav id="nav" class="nav"></nav>
+      <button id="theme-toggle" class="theme-toggle" title="Toggle light/dark" aria-label="Toggle light/dark mode"></button>
+    </div>
   </header>
 
   <main id="main" class="main"></main>

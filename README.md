@@ -125,6 +125,25 @@ available models" in the settings UI (a live `GET /openai/v1/models` with
 your key) tells you what's actually available right now rather than
 requiring a code update.
 
+## Appearance: light/dark mode and palettes
+
+The compact button in the header (☾/☀) toggles between dark and light mode
+instantly, with no page reload. Under **Data / Export → Appearance** there's
+a fuller control:
+
+- **Mode**: Dark, Light, or Auto (follows your OS/browser's
+  `prefers-color-scheme`).
+- **Palette**: four hand-tuned presets (Lab, Slate & steel, Rust & moss,
+  Violet & teal), each with its own dark *and* light variant, so switching
+  mode never resets your color choice. Pick **Custom** to set your own
+  Accent, Accent 2, Accent 3, and Danger colors with plain color pickers —
+  they apply live as you drag.
+
+All of this lives in `js/theme.js`, loaded early in `<head>` so it applies
+before the page paints (no flash of the wrong theme). It only ever writes to
+one `localStorage` key (`thirdPosition.theme`) — never IndexedDB, never
+exported, never sent anywhere.
+
 ## How Discoveries are calculated
 
 All of the logic lives in `js/insights.js`, in one function,
@@ -178,6 +197,7 @@ either way" — recomputed live, never persisted, never claimed as a finding.
 ```
 index.html            app shell
 css/styles.css         all styling
+js/theme.js              light/dark mode + selectable/custom color palettes
 js/db.js                 IndexedDB wrapper
 js/oddOneOut.js          the offline fallback triad bank (edit to add triads)
 js/groq.js               optional, off-by-default AI puzzle generation (Groq)

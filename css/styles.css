@@ -1,3 +1,8 @@
+/* Base tokens. --accent/--accent-2/--accent-3/--danger (and --accent-4,
+   which always mirrors --danger) are re-set inline by js/theme.js on top
+   of whichever of these two blocks is active — palette choice is
+   independent of light/dark mode. These :root values are just the
+   fallback "lab" palette for each mode, in case JS hasn't run yet. */
 :root {
   --bg: #0e1214;
   --bg-panel: #171c1f;
@@ -11,11 +16,26 @@
   --accent-4: #d9736c;
   --danger: #d9736c;
   --line: #2b3236;
-  --grid-line: rgba(224, 163, 54, 0.06);
+  --grid-line: color-mix(in srgb, var(--accent) 6%, transparent);
   --dc: var(--accent);
   --mc: var(--accent);
   --font-mono: "IBM Plex Mono", "SF Mono", Menlo, Consolas, monospace;
   --font-serif: Georgia, "Iowan Old Style", serif;
+}
+
+:root[data-theme="light"] {
+  --bg: #f3ede1;
+  --bg-panel: #fbf8f2;
+  --bg-inset: #ece3d0;
+  --ink: #5b5344;
+  --ink-bright: #241f16;
+  --line: #d9cbac;
+  --grid-line: color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent: #a8721f;
+  --accent-2: #2f7b68;
+  --accent-3: #7a5aa8;
+  --accent-4: #b8483f;
+  --danger: #b8483f;
 }
 
 * {
@@ -34,9 +54,9 @@ body {
 
 body {
   background-image:
-    radial-gradient(ellipse 900px 500px at 12% -10%, rgba(224, 163, 54, 0.10), transparent 60%),
-    radial-gradient(ellipse 800px 500px at 100% 0%, rgba(168, 131, 209, 0.09), transparent 60%),
-    radial-gradient(ellipse 900px 600px at 40% 110%, rgba(79, 157, 138, 0.08), transparent 60%),
+    radial-gradient(ellipse 900px 500px at 12% -10%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+    radial-gradient(ellipse 800px 500px at 100% 0%, color-mix(in srgb, var(--accent-3) 9%, transparent), transparent 60%),
+    radial-gradient(ellipse 900px 600px at 40% 110%, color-mix(in srgb, var(--accent-2) 8%, transparent), transparent 60%),
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: auto, auto, auto, 28px 28px, 28px 28px;
@@ -44,10 +64,11 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 ::selection {
-  background: rgba(224, 163, 54, 0.35);
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
   color: var(--ink-bright);
 }
 
@@ -108,7 +129,7 @@ body {
   align-items: center;
   justify-content: center;
   border-radius: 3px;
-  background: conic-gradient(from 200deg, rgba(224, 163, 54, 0.25), rgba(168, 131, 209, 0.2), rgba(79, 157, 138, 0.2), rgba(224, 163, 54, 0.25));
+  background: conic-gradient(from 200deg, color-mix(in srgb, var(--accent) 25%, transparent), color-mix(in srgb, var(--accent-3) 20%, transparent), color-mix(in srgb, var(--accent-2) 20%, transparent), color-mix(in srgb, var(--accent) 25%, transparent));
 }
 
 .brand h1 {
@@ -160,7 +181,111 @@ body {
   border-color: transparent;
   color: #17140f;
   font-weight: 600;
-  box-shadow: 0 4px 14px rgba(224, 163, 54, 0.3);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.theme-toggle {
+  font-size: 17px;
+  line-height: 1;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  width: 40px;
+  height: 40px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
+}
+
+.theme-toggle:hover {
+  border-color: var(--accent-3);
+  color: var(--ink-bright);
+  transform: translateY(-1px);
+}
+
+/* ---------- appearance / palette picker ---------- */
+
+.palette-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0 4px;
+}
+
+.palette-swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 7px 11px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.palette-swatch:hover {
+  border-color: var(--accent-3);
+  color: var(--ink-bright);
+}
+
+.palette-swatch.active {
+  border-color: var(--accent);
+  color: var(--ink-bright);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.palette-swatch-dots {
+  display: flex;
+  gap: 3px;
+}
+
+.palette-swatch-dots span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.custom-color-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 10px 0;
+}
+
+.custom-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink);
+}
+
+.custom-color-field input[type="color"] {
+  width: 44px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  background: none;
+  cursor: pointer;
 }
 
 /* ---------- main ---------- */
@@ -261,7 +386,7 @@ body {
 .other-input:focus {
   outline: none;
   border-color: var(--accent-3);
-  box-shadow: 0 0 0 3px rgba(168, 131, 209, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-3) 18%, transparent);
 }
 
 .btn {
@@ -283,7 +408,7 @@ body {
 
 .btn:hover {
   filter: brightness(1.1);
-  box-shadow: 0 6px 20px rgba(224, 163, 54, 0.3);
+  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 30%, transparent);
   transform: translateY(-1px);
 }
 
@@ -312,7 +437,7 @@ body {
 }
 
 .btn.danger:hover {
-  box-shadow: 0 4px 16px rgba(217, 115, 108, 0.3);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--danger) 30%, transparent);
 }
 
 .file-btn {
@@ -326,7 +451,7 @@ body {
   padding: 10px 12px;
   border: 1px solid var(--danger);
   color: var(--ink-bright);
-  background: rgba(217, 115, 108, 0.14);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   font-size: 14px;
   border-radius: 4px;
 }
@@ -450,12 +575,12 @@ body {
 
 .triad-result-correct {
   border: 1px solid var(--accent-2);
-  background: linear-gradient(135deg, rgba(79, 157, 138, 0.1), transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent);
 }
 
 .triad-result-incorrect {
   border: 1px solid var(--danger);
-  background: linear-gradient(135deg, rgba(217, 115, 108, 0.1), transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--danger) 10%, transparent), transparent);
 }
 
 .triad-result p {
@@ -494,7 +619,7 @@ body {
   border-radius: 5px;
   padding: 14px 16px;
   margin-bottom: 20px;
-  background: linear-gradient(135deg, rgba(168, 131, 209, 0.08), transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-3) 8%, transparent), transparent);
 }
 
 .near-miss-item {
@@ -534,7 +659,7 @@ body {
 .search-input:focus {
   outline: none;
   border-color: var(--accent-3);
-  box-shadow: 0 0 0 3px rgba(168, 131, 209, 0.18);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-3) 18%, transparent);
 }
 
 .archive-list {
@@ -651,19 +776,19 @@ body {
 
 .discovery-card.type-evolution {
   border-left-color: var(--accent-2);
-  background: linear-gradient(90deg, rgba(79, 157, 138, 0.08), var(--bg-inset) 50%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-2) 8%, transparent), var(--bg-inset) 50%);
 }
 .discovery-card.type-outlier {
   border-left-color: var(--accent-4);
-  background: linear-gradient(90deg, rgba(217, 115, 108, 0.08), var(--bg-inset) 50%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--danger) 8%, transparent), var(--bg-inset) 50%);
 }
 .discovery-card.type-domain_split {
   border-left-color: var(--accent-3);
-  background: linear-gradient(90deg, rgba(168, 131, 209, 0.08), var(--bg-inset) 50%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent-3) 8%, transparent), var(--bg-inset) 50%);
 }
 .discovery-card.type-observed_pattern {
   border-left-color: var(--accent);
-  background: linear-gradient(90deg, rgba(224, 163, 54, 0.08), var(--bg-inset) 50%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 8%, transparent), var(--bg-inset) 50%);
 }
 
 .discovery-type {
@@ -755,7 +880,7 @@ body {
   overflow-y: auto;
   padding: 24px;
   border-radius: 6px;
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(224, 163, 54, 0.15);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px color-mix(in srgb, var(--accent) 15%, transparent);
   position: relative;
 }
 
