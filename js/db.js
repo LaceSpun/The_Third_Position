@@ -1,7 +1,7 @@
 /* Minimal IndexedDB wrapper. Everything stays on-device. */
 
 const DB_NAME = "third-position-db";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let _dbPromise = null;
 
@@ -11,29 +11,20 @@ function openDB() {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
-      if (!db.objectStoreNames.contains("responses")) {
-        const store = db.createObjectStore("responses", { keyPath: "id" });
-        store.createIndex("dilemmaId", "dilemmaId", { unique: false });
-        store.createIndex("timestamp", "timestamp", { unique: false });
-      }
       if (!db.objectStoreNames.contains("meta")) {
         db.createObjectStore("meta", { keyPath: "key" });
       }
-      if (!db.objectStoreNames.contains("discoveries")) {
-        db.createObjectStore("discoveries", { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains("aiNotes")) {
-        // Optional, opt-in AI micro-observations (see js/groq.js). Kept in
-        // their own store so they're trivially excludable from export/import
-        // and never mixed into the deterministic discovery engine's data.
-        const store = db.createObjectStore("aiNotes", { keyPath: "id" });
-        store.createIndex("responseId", "responseId", { unique: false });
-      }
       if (!db.objectStoreNames.contains("patternChecks")) {
-        // "Pattern Check" odd-one-out puzzle attempts (see js/patternCheck.js).
-        // Separate from both responses and discoveries — this is a different
-        // activity (diagnosis, not synthesis) with its own light scoring.
+        // Every Pattern Check attempt, fully self-contained: the triad text
+        // itself is stored on the record (not just a reference), since
+        // AI-generated triads are one-off and never reproducible from a
+        // static bank the way the authored fallback triads are.
         db.createObjectStore("patternChecks", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("discoveries")) {
+        // Evidence-gated insights about the user's own pattern-recognition,
+        // computed by js/insights.js. Never mixed with raw attempts.
+        db.createObjectStore("discoveries", { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);
@@ -54,31 +45,6 @@ function reqToPromise(req) {
 }
 
 const DB = {
-  async addResponse(response) {
-    const t = await tx(["responses"], "readwrite");
-    t.objectStore("responses").add(response);
-    return new Promise((res, rej) => {
-      t.oncomplete = () => res(response);
-      t.onerror = () => rej(t.error);
-    });
-  },
-
-  async getAllResponses() {
-    const t = await tx(["responses"], "readonly");
-    const all = await reqToPromise(t.objectStore("responses").getAll());
-    all.sort((a, b) => a.timestamp - b.timestamp);
-    return all;
-  },
-
-  async deleteResponse(id) {
-    const t = await tx(["responses"], "readwrite");
-    t.objectStore("responses").delete(id);
-    return new Promise((res, rej) => {
-      t.oncomplete = () => res();
-      t.onerror = () => rej(t.error);
-    });
-  },
-
   async putMeta(key, value) {
     const t = await tx(["meta"], "readwrite");
     t.objectStore("meta").put({ key, value });
@@ -99,37 +65,6 @@ const DB = {
     return reqToPromise(t.objectStore("meta").getAll());
   },
 
-  async saveDiscoveries(discoveries) {
-    const t = await tx(["discoveries"], "readwrite");
-    const store = t.objectStore("discoveries");
-    for (const d of discoveries) store.put(d);
-    return new Promise((res, rej) => {
-      t.oncomplete = () => res();
-      t.onerror = () => rej(t.error);
-    });
-  },
-
-  async getAllDiscoveries() {
-    const t = await tx(["discoveries"], "readonly");
-    return reqToPromise(t.objectStore("discoveries").getAll());
-  },
-
-  async addAINote(note) {
-    const t = await tx(["aiNotes"], "readwrite");
-    t.objectStore("aiNotes").add(note);
-    return new Promise((res, rej) => {
-      t.oncomplete = () => res(note);
-      t.onerror = () => rej(t.error);
-    });
-  },
-
-  async getAllAINotes() {
-    const t = await tx(["aiNotes"], "readonly");
-    const all = await reqToPromise(t.objectStore("aiNotes").getAll());
-    all.sort((a, b) => a.createdAt - b.createdAt);
-    return all;
-  },
-
   async addPatternCheck(check) {
     const t = await tx(["patternChecks"], "readwrite");
     t.objectStore("patternChecks").add(check);
@@ -146,8 +81,23 @@ const DB = {
     return all;
   },
 
+  async saveDiscoveries(discoveries) {
+    const t = await tx(["discoveries"], "readwrite");
+    const store = t.objectStore("discoveries");
+    for (const d of discoveries) store.put(d);
+    return new Promise((res, rej) => {
+      t.oncomplete = () => res();
+      t.onerror = () => rej(t.error);
+    });
+  },
+
+  async getAllDiscoveries() {
+    const t = await tx(["discoveries"], "readonly");
+    return reqToPromise(t.objectStore("discoveries").getAll());
+  },
+
   async clearAll() {
-    const stores = ["responses", "meta", "discoveries", "aiNotes", "patternChecks"];
+    const stores = ["meta", "patternChecks", "discoveries"];
     const t = await tx(stores, "readwrite");
     for (const s of stores) t.objectStore(s).clear();
     return new Promise((res, rej) => {
@@ -156,20 +106,16 @@ const DB = {
     });
   },
 
-  async replaceAll({ responses = [], meta = [], discoveries = [], aiNotes = [], patternChecks = [] }) {
-    const stores = ["responses", "meta", "discoveries", "aiNotes", "patternChecks"];
+  async replaceAll({ meta = [], patternChecks = [], discoveries = [] }) {
+    const stores = ["meta", "patternChecks", "discoveries"];
     const t = await tx(stores, "readwrite");
-    const rs = t.objectStore("responses");
     const ms = t.objectStore("meta");
-    const ds = t.objectStore("discoveries");
-    const ns = t.objectStore("aiNotes");
     const ps = t.objectStore("patternChecks");
+    const ds = t.objectStore("discoveries");
     for (const s of stores) t.objectStore(s).clear();
-    for (const r of responses) rs.put(r);
     for (const m of meta) ms.put(m);
-    for (const d of discoveries) ds.put(d);
-    for (const n of aiNotes) ns.put(n);
     for (const p of patternChecks) ps.put(p);
+    for (const d of discoveries) ds.put(d);
     return new Promise((res, rej) => {
       t.oncomplete = () => res();
       t.onerror = () => rej(t.error);

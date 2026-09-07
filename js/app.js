@@ -1,22 +1,9 @@
-/* THE THIRD POSITION — app controller */
+/* THE THIRD POSITION — app controller (Pattern Check core) */
 
-const TRIVIAL_PATTERNS = [
-  /^\s*(both( are| sides are)? (partly|somewhat|kind of|sort of) right\.?)\s*$/i,
-  /^\s*(it depends\.?)\s*$/i,
-  /^\s*(a (little )?bit of both\.?)\s*$/i,
-  /^\s*(there'?s truth (to|in) both\.?)\s*$/i,
-  /^\s*(somewhere in the middle\.?)\s*$/i,
-  /^\s*(a mix of both\.?)\s*$/i,
-  /^\s*(both\.?)\s*$/i,
-];
-
-const MIN_LENGTH = 40;
+const SVG_NS = "http://www.w3.org/2000/svg";
 
 const state = {
-  view: "today",
-  currentDilemma: null,
-  stage: "idle", // idle -> position -> mechanism -> done -> (back to idle)
-  draftThirdPosition: "",
+  view: "patterncheck",
 };
 
 function $(sel, root = document) {
@@ -37,66 +24,24 @@ function el(tag, attrs = {}, children = []) {
   return e;
 }
 
-function domainSlug(domain) {
-  return domain.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+function shuffledIndices(n) {
+  const idx = [...Array(n).keys()];
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  return idx;
 }
 
-// A distinct hue per domain, so the archive, case headers, and pattern lab
-// read as a spectrum rather than one flat color. Picked by hand for contrast
-// against the dark ground, not generated — a hashed hue tends to clash.
-const DOMAIN_COLORS = {
-  "knowledge & evidence": "#c98f3f",
-  "relationships": "#d9736c",
-  "autonomy": "#5fb0c7",
-  "morality": "#b5504a",
-  "creativity": "#c77dd1",
-  "classification": "#8a9a5b",
-  "identity": "#e0a336",
-  "memory": "#7f8fd1",
-  "uncertainty": "#9a8f7a",
-  "decision-making": "#4f9d8a",
-  "social interpretation": "#d18f9e",
-  "responsibility": "#c2703a",
-  "rules & exceptions": "#6d9dc5",
-  "order & spontaneity": "#e0c05c",
-  "emotional reasoning": "#cf6d95",
-  "aesthetics": "#a883d1",
-  "trust": "#7fa88a",
-  "change & continuity": "#c9a86a",
-};
-
-function domainColor(domain) {
-  return DOMAIN_COLORS[domain] || "var(--accent)";
-}
-
-function domainStyleAttr(domain) {
-  return `--dc: ${domainColor(domain)}`;
-}
-
-// A distinct hue per mechanism, so the move grid reads as a spectrum of
-// choices rather than one uniform tile repeated twelve times.
-const MECHANISM_COLORS = {
-  CONDITION: "#d79b46",
-  THRESHOLD: "#e0c05c",
-  SEQUENCE: "#4f9d8a",
-  DIFFERENT_LEVELS: "#5fb0c7",
-  DIFFERENT_FUNCTIONS: "#6d9dc5",
-  REVERSIBILITY: "#7fa88a",
-  CONTROL_AGENCY: "#c2703a",
-  FEEDBACK_LOOP: "#8a9a5b",
-  CONTEXT: "#a883d1",
-  NEW_VARIABLE: "#cf6d95",
-  PRESERVE_CONTRADICTION: "#d9736c",
-  OTHER: "#9a8f7a",
-};
-
-function mechanismColor(id) {
-  return MECHANISM_COLORS[id] || "var(--accent)";
-}
-
-function mechanismPill(response) {
-  const label = response.mechanism === "OTHER" ? response.mechanismOther : mechanismLabel(response.mechanism);
-  return el("span", { class: "pill", style: `--mc: ${mechanismColor(response.mechanism)}`, text: label });
+// A distinct hue per shared-logic label, hashed deterministically since
+// labels are open-ended (hand-written or AI-invented) rather than a fixed
+// enum — so this can't be a hardcoded lookup table the way domain colors
+// used to be.
+const LABEL_PALETTE = ["#c98f3f", "#d9736c", "#5fb0c7", "#b5504a", "#c77dd1", "#8a9a5b", "#e0a336", "#7f8fd1", "#9a8f7a", "#4f9d8a", "#d18f9e", "#6d9dc5"];
+function colorForLabel(label) {
+  let hash = 0;
+  for (let i = 0; i < label.length; i++) hash = (hash * 31 + label.charCodeAt(i)) >>> 0;
+  return LABEL_PALETTE[hash % LABEL_PALETTE.length];
 }
 
 // If a request quietly fell through to a fallback model, say so — never
@@ -107,70 +52,15 @@ function aiModelFootnote(modelUsed) {
   return el("p", { class: "muted small", text: `(answered by fallback model ${modelUsed} — ${configured} was unavailable)` });
 }
 
-// ---------- dilemma selection ----------
-
-function daysBetween(a, b) {
-  return Math.abs(a - b) / (1000 * 60 * 60 * 24);
-}
-
-function pickTodaysDilemma(responses) {
-  const now = Date.now();
-  const answeredCountByDilemma = new Map();
-  const lastAnsweredByDilemma = new Map();
-  const lastAnsweredByFamily = new Map();
-  const domainCounts = new Map();
-
-  for (const r of responses) {
-    answeredCountByDilemma.set(r.dilemmaId, (answeredCountByDilemma.get(r.dilemmaId) || 0) + 1);
-    lastAnsweredByDilemma.set(r.dilemmaId, Math.max(lastAnsweredByDilemma.get(r.dilemmaId) || 0, r.timestamp));
-    const d = dilemmaById(r.dilemmaId);
-    if (d) {
-      domainCounts.set(d.domain, (domainCounts.get(d.domain) || 0) + 1);
-      if (d.twinGroup) {
-        lastAnsweredByFamily.set(d.twinGroup, Math.max(lastAnsweredByFamily.get(d.twinGroup) || 0, r.timestamp));
-      }
-    }
-  }
-
-  function twinSpacingOk(d) {
-    if (!d.twinGroup) return true;
-    const last = lastAnsweredByFamily.get(d.twinGroup);
-    if (!last) return true;
-    return daysBetween(now, last) >= 10; // keep twins spread apart
-  }
-
-  const unanswered = DILEMMAS.filter((d) => !answeredCountByDilemma.has(d.id));
-  let pool = unanswered.filter(twinSpacingOk);
-  if (pool.length === 0) pool = unanswered;
-
-  if (pool.length === 0) {
-    // bank exhausted at least once: resurface oldest-answered, respecting twin spacing when possible
-    let candidates = DILEMMAS.filter(twinSpacingOk);
-    if (candidates.length === 0) candidates = DILEMMAS.slice();
-    candidates.sort((a, b) => (lastAnsweredByDilemma.get(a.id) || 0) - (lastAnsweredByDilemma.get(b.id) || 0));
-    pool = candidates.slice(0, Math.max(3, Math.ceil(candidates.length * 0.15)));
-  } else {
-    // prefer domains that are under-represented so far
-    const minDomainCount = Math.min(...pool.map((d) => domainCounts.get(d.domain) || 0));
-    const preferred = pool.filter((d) => (domainCounts.get(d.domain) || 0) <= minDomainCount + 1);
-    if (preferred.length > 0) pool = preferred;
-  }
-
-  return pool[Math.floor(Math.random() * pool.length)];
-}
-
-// ---------- rendering shell ----------
+// ---------- nav / routing ----------
 
 function renderNav() {
   const nav = $("#nav");
   nav.innerHTML = "";
   const items = [
-    ["today", "Contradiction"],
+    ["patterncheck", "Pattern Check"],
     ["archive", "Archive"],
     ["discoveries", "Discoveries"],
-    ["map", "Contradiction Map"],
-    ["lab", "Pattern Lab"],
-    ["patterncheck", "Pattern Check"],
     ["data", "Data / Export"],
   ];
   for (const [id, label] of items) {
@@ -193,650 +83,15 @@ async function route() {
   main.innerHTML = "";
   main.appendChild(el("div", { class: "loading", text: "…" }));
   let view;
-  if (state.view === "today") view = await renderToday();
+  if (state.view === "patterncheck") view = await renderPatternCheck();
   else if (state.view === "archive") view = await renderArchive();
   else if (state.view === "discoveries") view = await renderDiscoveries();
-  else if (state.view === "map") view = await renderMapView();
-  else if (state.view === "lab") view = await renderPatternLab();
-  else if (state.view === "patterncheck") view = await renderPatternCheck();
   else if (state.view === "data") view = await renderDataView();
   main.innerHTML = "";
   main.appendChild(view);
 }
 
-// ---------- TODAY ----------
-// There is no daily cap: the app always keeps one dilemma "loaded" and ready
-// (in `pendingDilemmaId`) so you can answer as often as you like in a
-// sitting. What paces the experience is the discovery gate (see
-// discovery.js) and the twin-spacing rule inside pickTodaysDilemma — not a
-// once-a-day lock on the entry point itself.
-
-async function renderToday() {
-  // Mid-flow: keep showing whatever stage we're on, using the dilemma already
-  // picked for this session.
-  if ((state.stage === "position" || state.stage === "mechanism") && state.currentDilemma) {
-    const dilemma = state.currentDilemma;
-    const wrap = el("div", { class: "panel today-panel" });
-    wrap.appendChild(caseFileHeader(dilemma));
-    wrap.appendChild(state.stage === "position" ? renderPositionStage(dilemma) : renderMechanismStage(dilemma));
-    return wrap;
-  }
-
-  if (state.stage === "done" && state.lastSavedResponse) {
-    const wrap = el("div", { class: "panel today-panel" });
-    wrap.appendChild(caseFileHeader(state.currentDilemma));
-    wrap.appendChild(await renderDoneStage(state.currentDilemma, state.lastSavedResponse));
-    return wrap;
-  }
-
-  // Idle: resume an in-progress pick if the app was closed mid-answer,
-  // otherwise load a fresh one immediately — no waiting required.
-  const responses = await DB.getAllResponses();
-  let dilemma;
-  const pendingId = await DB.getMeta("pendingDilemmaId", null);
-  if (pendingId) {
-    dilemma = dilemmaById(pendingId) || pickTodaysDilemma(responses);
-  } else {
-    dilemma = pickTodaysDilemma(responses);
-    await DB.putMeta("pendingDilemmaId", dilemma.id);
-  }
-
-  state.currentDilemma = dilemma;
-  state.stage = "position";
-  state.draftThirdPosition = "";
-
-  const wrap = el("div", { class: "panel today-panel" });
-  wrap.appendChild(caseFileHeader(dilemma));
-  wrap.appendChild(renderPositionStage(dilemma));
-  return wrap;
-}
-
-function caseFileHeader(dilemma) {
-  return el("div", { class: "case-file-header", style: domainStyleAttr(dilemma.domain) }, [
-    el("span", { class: "case-id", text: `SPECIMEN ${dilemma.id.toUpperCase()}` }),
-    el("span", { class: "case-domain", text: dilemma.domain.toUpperCase() }),
-  ]);
-}
-
-function renderPositionStage(dilemma) {
-  const container = el("div", {});
-  container.appendChild(
-    el("div", { class: "position-block position-a" }, [el("div", { class: "position-tag", text: "POSITION A" }), el("p", { text: dilemma.positionA })])
-  );
-  container.appendChild(
-    el("div", { class: "position-block position-b" }, [el("div", { class: "position-tag", text: "POSITION B" }), el("p", { text: dilemma.positionB })])
-  );
-  container.appendChild(el("div", { class: "divider" }));
-  container.appendChild(el("h3", { class: "prompt", text: "FIND THE THIRD POSITION" }));
-  container.appendChild(
-    el("p", { class: "muted small", text: "Construct a position that preserves what's valid in both, without simply averaging them." })
-  );
-
-  const textarea = el("textarea", {
-    class: "third-position-input",
-    rows: "7",
-    placeholder: "Your third position…",
-  });
-  textarea.value = state.draftThirdPosition;
-  container.appendChild(textarea);
-
-  const warning = el("div", { class: "warning hidden" });
-  container.appendChild(warning);
-
-  container.appendChild(
-    el("button", {
-      class: "btn primary",
-      text: "Continue",
-      onclick: () => {
-        const text = textarea.value.trim();
-        if (text.length < MIN_LENGTH) {
-          warning.textContent = `Say a bit more — at least ${MIN_LENGTH} characters. A one-line answer rarely survives contact with a real dilemma.`;
-          warning.classList.remove("hidden");
-          return;
-        }
-        if (TRIVIAL_PATTERNS.some((re) => re.test(text))) {
-          warning.textContent =
-            "That reads as a pure compromise between A and B rather than a third position. What specific move are you actually making — a condition, a threshold, a different level? Try again.";
-          warning.classList.remove("hidden");
-          return;
-        }
-        state.draftThirdPosition = text;
-        state.stage = "mechanism";
-        route();
-      },
-    })
-  );
-
-  return container;
-}
-
-function renderMechanismStage(dilemma) {
-  const container = el("div", {});
-  container.appendChild(el("div", { class: "recap" }, [el("div", { class: "position-tag", text: "YOUR THIRD POSITION" }), el("p", { class: "recap-text", text: state.draftThirdPosition })]));
-  container.appendChild(el("div", { class: "divider" }));
-  container.appendChild(el("h3", { class: "prompt", text: "WHAT KIND OF MOVE DID YOU MAKE?" }));
-
-  let selectedMechanism = null;
-  const otherInput = el("input", { class: "other-input hidden", type: "text", placeholder: "Name the mechanism…", maxlength: "60" });
-
-  const grid = el("div", { class: "mechanism-grid" });
-  const buttons = [];
-  for (const m of MECHANISMS) {
-    const btn = el("button", { class: "mech-btn", style: `--mc: ${mechanismColor(m.id)}` }, [
-      el("div", { class: "mech-label", text: m.label }),
-      el("div", { class: "mech-hint", text: m.hint }),
-    ]);
-    btn.addEventListener("click", () => {
-      buttons.forEach((b) => b.classList.remove("selected"));
-      btn.classList.add("selected");
-      selectedMechanism = m.id;
-      otherInput.classList.toggle("hidden", m.id !== "OTHER");
-      if (m.id === "OTHER") otherInput.focus();
-    });
-    buttons.push(btn);
-    grid.appendChild(btn);
-  }
-  container.appendChild(grid);
-  container.appendChild(otherInput);
-
-  container.appendChild(el("div", { class: "divider" }));
-  container.appendChild(el("h4", { class: "prompt small", text: "OPTIONAL" }));
-
-  const optWrap = el("div", { class: "optional-fields" });
-
-  const confRow = el("div", { class: "field-row" });
-  confRow.appendChild(el("label", { text: "Confidence" }));
-  const confSlider = el("input", { type: "range", min: "0", max: "100", value: "70" });
-  const confVal = el("span", { class: "field-value", text: "70" });
-  confSlider.addEventListener("input", () => (confVal.textContent = confSlider.value));
-  confRow.appendChild(confSlider);
-  confRow.appendChild(confVal);
-  optWrap.appendChild(confRow);
-
-  const diffRow = el("div", { class: "field-row" });
-  diffRow.appendChild(el("label", { text: "Difficulty" }));
-  const diffSlider = el("input", { type: "range", min: "1", max: "5", value: "3" });
-  const diffVal = el("span", { class: "field-value", text: "3" });
-  diffSlider.addEventListener("input", () => (diffVal.textContent = diffSlider.value));
-  diffRow.appendChild(diffSlider);
-  diffRow.appendChild(diffVal);
-  optWrap.appendChild(diffRow);
-
-  const noteInput = el("textarea", { class: "note-input", rows: "2", placeholder: "This bothered / interested me because… (optional)" });
-  optWrap.appendChild(noteInput);
-
-  container.appendChild(optWrap);
-
-  const warning = el("div", { class: "warning hidden" });
-  container.appendChild(warning);
-
-  container.appendChild(
-    el("button", {
-      class: "btn primary",
-      text: "File this response",
-      onclick: async () => {
-        if (!selectedMechanism) {
-          warning.textContent = "Choose the move that best describes what you did.";
-          warning.classList.remove("hidden");
-          return;
-        }
-        if (selectedMechanism === "OTHER" && !otherInput.value.trim()) {
-          warning.textContent = "Name the mechanism you used.";
-          warning.classList.remove("hidden");
-          return;
-        }
-        const response = {
-          id: `r_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          dilemmaId: dilemma.id,
-          timestamp: Date.now(),
-          thirdPosition: state.draftThirdPosition,
-          mechanism: selectedMechanism,
-          mechanismOther: selectedMechanism === "OTHER" ? otherInput.value.trim() : null,
-          confidence: Number(confSlider.value),
-          difficulty: Number(diffSlider.value),
-          note: noteInput.value.trim(),
-        };
-        await DB.addResponse(response);
-        await DB.putMeta("pendingDilemmaId", null);
-        state.stage = "done";
-        state.lastSavedResponse = response;
-        const unlock = await checkMilestonesAndMaybeUnlock();
-        route().then(() => {
-          if (unlock) showUnlockModal(unlock);
-        });
-      },
-    })
-  );
-
-  return container;
-}
-
-async function renderDoneStage(dilemma, response) {
-  const wrap = el("div", { class: "done-stage" });
-  wrap.appendChild(el("h2", { text: "Filed." }));
-
-  const responses = await DB.getAllResponses();
-  const mechKey = response.mechanism === "OTHER" ? `OTHER:${(response.mechanismOther || "").trim().toLowerCase()}` : response.mechanism;
-  const sameMechCount = responses.filter((r) => (r.mechanism === "OTHER" ? `OTHER:${(r.mechanismOther || "").trim().toLowerCase()}` : r.mechanism) === mechKey).length;
-  const domainCount = responses.filter((r) => {
-    const d = dilemmaById(r.dilemmaId);
-    return d && d.domain === dilemma.domain;
-  }).length;
-  const mechLabel = response.mechanism === "OTHER" ? response.mechanismOther : mechanismLabel(response.mechanism);
-
-  const tags = el("div", { class: "feedback-tags" });
-  tags.appendChild(el("span", { class: "pill", text: `#${responses.length} logged overall` }));
-  tags.appendChild(
-    el("span", {
-      class: "pill",
-      style: `--mc: ${mechanismColor(response.mechanism)}`,
-      text: sameMechCount === 1 ? `first time using "${mechLabel}"` : `${ordinal(sameMechCount)} time using "${mechLabel}"`,
-    })
-  );
-  if (domainCount === 1) {
-    tags.appendChild(el("span", { class: "pill muted-pill", text: `first entry in ${dilemma.domain}` }));
-  }
-  wrap.appendChild(tags);
-
-  wrap.appendChild(
-    el("p", { class: "muted", text: "The pattern this belongs to won't be fully visible for a while — that's by design. Small counts like these are just bookkeeping, not a conclusion." })
-  );
-
-  if (groqIsActive()) {
-    const aiBox = el("div", { class: "ai-note-box" }, [
-      el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ) — reading…" }),
-    ]);
-    wrap.appendChild(aiBox);
-    requestMicroObservation(dilemma, response).then((result) => {
-      aiBox.innerHTML = "";
-      if (!result) {
-        aiBox.remove();
-        return;
-      }
-      if (result.error) {
-        aiBox.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — unavailable" }));
-        aiBox.appendChild(el("p", { class: "muted small", text: result.error }));
-        return;
-      }
-      aiBox.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ)" }));
-      aiBox.appendChild(el("p", { text: result.text }));
-      const footnote = aiModelFootnote(result.modelUsed);
-      if (footnote) aiBox.appendChild(footnote);
-      maybeSynthesize();
-    });
-  }
-
-  const actions = el("div", { class: "done-actions" });
-  actions.appendChild(
-    el("button", {
-      class: "btn primary",
-      text: "Answer another",
-      onclick: async () => {
-        const responses = await DB.getAllResponses();
-        const next = pickTodaysDilemma(responses);
-        await DB.putMeta("pendingDilemmaId", next.id);
-        state.currentDilemma = next;
-        state.stage = "position";
-        state.draftThirdPosition = "";
-        route();
-      },
-    })
-  );
-  actions.appendChild(
-    el("button", {
-      class: "btn secondary",
-      text: "Stop for now",
-      onclick: () => {
-        state.stage = "idle";
-        state.view = "archive";
-        route();
-      },
-    })
-  );
-  wrap.appendChild(actions);
-  return wrap;
-}
-
-function ordinal(n) {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
-
-function showUnlockModal(unlock) {
-  const overlay = el("div", { class: "modal-overlay" });
-  const modal = el("div", { class: "modal" });
-  const headerText = unlock.timeBased ? "PERIODIC RECHECK — NEW EVIDENCE" : `MILESTONE — ${unlock.milestone} RESPONSES`;
-  modal.appendChild(el("div", { class: "modal-header", text: headerText }));
-  if (unlock.discoveries.length === 0) {
-    modal.appendChild(el("p", { text: "No stable pattern has emerged yet. That itself is worth noting — keep going." }));
-  } else {
-    modal.appendChild(el("p", { class: "muted", text: `${unlock.discoveries.length} discovery(ies) unlocked or updated:` }));
-    const list = el("div", { class: "discovery-list" });
-    for (const d of unlock.discoveries) list.appendChild(renderDiscoveryCard(d));
-    modal.appendChild(list);
-  }
-  modal.appendChild(
-    el("button", {
-      class: "btn primary",
-      text: "Close",
-      onclick: () => overlay.remove(),
-    })
-  );
-  overlay.appendChild(modal);
-  document.body.appendChild(overlay);
-}
-
-// ---------- ARCHIVE ----------
-
-async function renderArchive() {
-  const responses = (await DB.getAllResponses()).slice().reverse();
-  const wrap = el("div", { class: "panel" });
-  wrap.appendChild(el("h2", { text: "Archive" }));
-  if (responses.length === 0) {
-    wrap.appendChild(el("p", { class: "muted", text: "No entries yet." }));
-    return wrap;
-  }
-
-  const searchRow = el("div", { class: "field-row" });
-  const search = el("input", { type: "text", placeholder: "Search archive…", class: "search-input" });
-  searchRow.appendChild(search);
-  wrap.appendChild(searchRow);
-
-  // Latest AI note per response, keyed by responseId — built once up front so
-  // draw() can stay synchronous; individual "Ask AI" clicks patch this map
-  // and re-render just that one card's note area.
-  const allNotes = groqIsActive() ? await DB.getAllAINotes() : [];
-  const notesByResponse = new Map();
-  for (const n of allNotes) notesByResponse.set(n.responseId, n);
-
-  if (groqIsActive()) {
-    const unreviewed = responses.filter((r) => !notesByResponse.has(r.id));
-    if (unreviewed.length > 0) {
-      const backfillRow = el("div", { class: "field-row" });
-      const backfillStatus = el("span", { class: "muted small" });
-      const backfillBtn = el("button", {
-        class: "btn secondary",
-        text: `Ask AI to weigh in on all ${unreviewed.length} unreviewed response(s)`,
-        onclick: async () => {
-          backfillBtn.disabled = true;
-          for (let i = 0; i < unreviewed.length; i++) {
-            const r = unreviewed[i];
-            backfillStatus.textContent = `Reviewing ${i + 1} of ${unreviewed.length}…`;
-            const d = dilemmaById(r.dilemmaId);
-            if (d) {
-              const result = await requestMicroObservation(d, r);
-              if (result && !result.error) notesByResponse.set(r.id, result);
-            }
-          }
-          backfillStatus.textContent = "Done.";
-          await maybeSynthesize();
-          draw();
-        },
-      });
-      backfillRow.appendChild(backfillBtn);
-      backfillRow.appendChild(backfillStatus);
-      wrap.appendChild(backfillRow);
-    }
-  }
-
-  const list = el("div", { class: "archive-list" });
-  wrap.appendChild(list);
-
-  function renderAINoteArea(r, d) {
-    const box = el("div", { class: "ai-note-box" });
-    function fill() {
-      box.innerHTML = "";
-      const current = notesByResponse.get(r.id);
-      if (current) {
-        box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION (OPTIONAL, GROQ)" }));
-        box.appendChild(el("p", { text: current.text }));
-        const footnote = aiModelFootnote(current.modelUsed);
-        if (footnote) box.appendChild(footnote);
-        box.appendChild(
-          el("button", {
-            class: "btn secondary",
-            text: "Ask AI again",
-            onclick: async () => {
-              box.innerHTML = "";
-              box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — reading…" }));
-              const result = await requestMicroObservation(d, r);
-              if (result && !result.error) notesByResponse.set(r.id, result);
-              fill();
-              maybeSynthesize();
-            },
-          })
-        );
-      } else {
-        box.appendChild(
-          el("button", {
-            class: "btn secondary",
-            text: "Ask AI to weigh in",
-            onclick: async () => {
-              box.innerHTML = "";
-              box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — reading…" }));
-              const result = await requestMicroObservation(d, r);
-              if (result && !result.error) notesByResponse.set(r.id, result);
-              else if (result && result.error) {
-                box.innerHTML = "";
-                box.appendChild(el("div", { class: "dg-label", text: "AI OBSERVATION — unavailable" }));
-                box.appendChild(el("p", { class: "muted small", text: result.error }));
-                return;
-              }
-              fill();
-              maybeSynthesize();
-            },
-          })
-        );
-      }
-    }
-    fill();
-    return box;
-  }
-
-  function draw() {
-    list.innerHTML = "";
-    const q = search.value.trim().toLowerCase();
-    for (const r of responses) {
-      const d = dilemmaById(r.dilemmaId);
-      if (!d) continue;
-      const hay = `${d.domain} ${d.positionA} ${d.positionB} ${r.thirdPosition} ${r.note}`.toLowerCase();
-      if (q && !hay.includes(q)) continue;
-      const card = el("div", { class: "archive-card", style: domainStyleAttr(d.domain) });
-      card.appendChild(
-        el("div", { class: "archive-card-header" }, [
-          el("span", { class: "case-domain", text: d.domain }),
-          el("span", { class: "muted small", text: new Date(r.timestamp).toLocaleDateString() }),
-        ])
-      );
-      card.appendChild(el("p", { class: "archive-positions", text: `A: ${d.positionA}` }));
-      card.appendChild(el("p", { class: "archive-positions", text: `B: ${d.positionB}` }));
-      card.appendChild(el("p", { class: "archive-third", text: r.thirdPosition }));
-      const meta = el("div", { class: "archive-meta" });
-      meta.appendChild(mechanismPill(r));
-      if (r.confidence != null) meta.appendChild(el("span", { class: "pill muted-pill", text: `confidence ${r.confidence}` }));
-      if (r.difficulty != null) meta.appendChild(el("span", { class: "pill muted-pill", text: `difficulty ${r.difficulty}/5` }));
-      card.appendChild(meta);
-      if (r.note) card.appendChild(el("p", { class: "archive-note", text: `“${r.note}”` }));
-      if (groqIsActive()) card.appendChild(renderAINoteArea(r, d));
-      list.appendChild(card);
-    }
-    if (!list.children.length) list.appendChild(el("p", { class: "muted", text: "No matches." }));
-  }
-  search.addEventListener("input", draw);
-  draw();
-  return wrap;
-}
-
-// ---------- DISCOVERIES ----------
-
-function renderDiscoveryCard(d) {
-  const card = el("div", { class: `discovery-card type-${d.type.toLowerCase()}` });
-  card.appendChild(el("div", { class: "discovery-type", text: d.type.replaceAll("_", " ") }));
-  card.appendChild(el("h4", { class: "discovery-title", text: d.title }));
-  card.appendChild(el("p", { class: "discovery-pattern", text: d.observedPattern }));
-
-  const grid = el("div", { class: "discovery-grid" });
-  grid.appendChild(el("div", { class: "dg-label", text: "EVIDENCE COUNT" }));
-  grid.appendChild(el("div", { text: String(d.evidenceCount) }));
-  grid.appendChild(el("div", { class: "dg-label", text: "DOMAINS" }));
-  grid.appendChild(el("div", { text: d.domains.join(", ") || "—" }));
-  grid.appendChild(el("div", { class: "dg-label", text: "CONFIDENCE" }));
-  grid.appendChild(el("div", { text: d.confidence }));
-  card.appendChild(grid);
-
-  if (d.exampleResponses && d.exampleResponses.length) {
-    const ex = el("div", { class: "discovery-examples" });
-    ex.appendChild(el("div", { class: "dg-label", text: "EXAMPLE RESPONSES" }));
-    for (const e of d.exampleResponses) {
-      ex.appendChild(el("p", { class: "example-snippet", text: `[${e.domain}] "${e.snippet}" — ${e.mechanism}` }));
-    }
-    card.appendChild(ex);
-  }
-  if (d.counterexamples && d.counterexamples.length) {
-    const cx = el("div", { class: "discovery-examples" });
-    cx.appendChild(el("div", { class: "dg-label", text: "COUNTEREXAMPLES" }));
-    for (const e of d.counterexamples) {
-      cx.appendChild(el("p", { class: "example-snippet counter", text: `[${e.domain}] "${e.snippet}" — ${e.mechanism}` }));
-    }
-    card.appendChild(cx);
-  }
-
-  card.appendChild(el("p", { class: "discovery-alt" }, [el("strong", { text: "Alternative explanation: " }), document.createTextNode(d.alternativeExplanation)]));
-  card.appendChild(el("p", { class: "discovery-disconfirm" }, [el("strong", { text: "What would disconfirm this: " }), document.createTextNode(d.disconfirm)]));
-  return card;
-}
-
-function renderAISynthesisCard(d) {
-  const card = el("div", { class: "discovery-card type-ai_synthesis" });
-  card.appendChild(el("div", { class: "discovery-type", text: "AI SYNTHESIS · GROQ · INFORMAL" }));
-  card.appendChild(el("p", { class: "discovery-pattern", text: d.text }));
-  card.appendChild(
-    el("p", {
-      class: "discovery-alt",
-      text: `Based on ${d.basedOnCount} recent AI observation(s). This is a language model's read of your writing, not the evidence-gated discovery engine above — treat it as a prompt to notice something, not a finding.`,
-    })
-  );
-  const footnote = aiModelFootnote(d.modelUsed);
-  if (footnote) card.appendChild(footnote);
-  return card;
-}
-
-async function renderDiscoveries() {
-  const wrap = el("div", { class: "panel" });
-  wrap.appendChild(el("h2", { text: "Discoveries" }));
-  const allDiscoveries = (await DB.getAllDiscoveries()).sort((a, b) => b.computedAt - a.computedAt);
-  const discoveries = allDiscoveries.filter((d) => d.type !== "AI_SYNTHESIS");
-  const aiSyntheses = allDiscoveries.filter((d) => d.type === "AI_SYNTHESIS");
-  const responses = await DB.getAllResponses();
-  const schedule = nextMilestoneSchedule(responses.length);
-  const nextMilestone = schedule.find((m) => m > responses.length);
-  wrap.appendChild(
-    el("p", {
-      class: "muted small",
-      text: `${responses.length} responses logged. Next check at ${nextMilestone ?? "—"} responses, or sooner if it's been a few days since the last check.`,
-    })
-  );
-
-  const nearMisses = computeNearMisses(responses);
-  if (nearMisses.length) {
-    const section = el("div", { class: "near-miss-section" });
-    section.appendChild(el("div", { class: "dg-label", text: "BUILDING EVIDENCE — not yet confirmed" }));
-    for (const nm of nearMisses) {
-      section.appendChild(el("div", { class: "near-miss-item" }, [el("strong", { text: nm.label }), el("p", { text: nm.detail })]));
-    }
-    wrap.appendChild(section);
-  }
-
-  if (discoveries.length === 0) {
-    wrap.appendChild(el("p", { class: "muted", text: "Nothing confirmed yet. Discoveries require repeated evidence, not single answers." }));
-  } else {
-    for (const d of discoveries) wrap.appendChild(renderDiscoveryCard(d));
-  }
-
-  if (aiSyntheses.length) {
-    wrap.appendChild(el("div", { class: "divider" }));
-    wrap.appendChild(el("h3", { class: "prompt small", text: "AI SYNTHESES (OPTIONAL, OFF BY DEFAULT)" }));
-    for (const d of aiSyntheses) wrap.appendChild(renderAISynthesisCard(d));
-  }
-
-  return wrap;
-}
-
-// ---------- CONTRADICTION MAP ----------
-
-async function renderMapView() {
-  const wrap = el("div", { class: "panel" });
-  wrap.appendChild(el("h2", { text: "Contradiction Map" }));
-  wrap.appendChild(
-    el("p", { class: "muted small", text: "Outer ring: domains. Middle ring: structural families (tensions). Inner ring: mechanisms. Line weight = frequency." })
-  );
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("class", "contradiction-map");
-  const responses = await DB.getAllResponses();
-  renderMap(svg, responses);
-  wrap.appendChild(svg);
-  return wrap;
-}
-
-// ---------- PATTERN LAB ----------
-
-async function renderPatternLab() {
-  const wrap = el("div", { class: "panel" });
-  wrap.appendChild(el("h2", { text: "Pattern Lab" }));
-  wrap.appendChild(el("p", { class: "muted small", text: "Structural twins: dilemmas that look unrelated but test the same underlying tension." }));
-
-  const responses = await DB.getAllResponses();
-  const byTwin = new Map();
-  for (const r of responses) {
-    const d = dilemmaById(r.dilemmaId);
-    if (!d || !d.twinGroup) continue;
-    if (!byTwin.has(d.twinGroup)) byTwin.set(d.twinGroup, []);
-    byTwin.get(d.twinGroup).push({ r, d });
-  }
-
-  let any = false;
-  for (const [twinGroup, items] of byTwin) {
-    const distinct = new Map();
-    for (const it of items) distinct.set(it.d.id, it); // latest response per dilemma
-    if (distinct.size < 2) continue;
-    any = true;
-    const card = el("div", { class: "twin-card" });
-    card.appendChild(el("div", { class: "discovery-type", text: twinGroup.replace("TWIN_", "").replaceAll("_", " ") }));
-    for (const { r, d } of distinct.values()) {
-      const side = el("div", { class: "twin-side", style: domainStyleAttr(d.domain) });
-      side.appendChild(el("div", { class: "case-domain", text: d.domain }));
-      side.appendChild(el("p", { class: "muted small", text: `A: ${d.positionA}` }));
-      side.appendChild(el("p", { class: "muted small", text: `B: ${d.positionB}` }));
-      side.appendChild(el("p", { class: "archive-third", text: r.thirdPosition }));
-      side.appendChild(mechanismPill(r));
-      card.appendChild(side);
-    }
-    wrap.appendChild(card);
-  }
-  if (!any) {
-    wrap.appendChild(
-      el("p", { class: "muted", text: "No comparable twin pairs yet. As you answer more dilemmas, structural twins will surface here automatically." })
-    );
-  }
-  return wrap;
-}
-
 // ---------- PATTERN CHECK ----------
-// A different activity from the daily Contradiction: three stances, two
-// share a real underlying logic, one doesn't — spot the odd one out before
-// writing anything. Diagnosis, not synthesis. See js/patternCheck.js.
-
-function shuffledIndices(n) {
-  const idx = [...Array(n).keys()];
-  for (let i = idx.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [idx[i], idx[j]] = [idx[j], idx[i]];
-  }
-  return idx;
-}
-
-const SVG_NS = "http://www.w3.org/2000/svg";
 
 async function renderPatternCheck() {
   const wrap = el("div", { class: "panel" });
@@ -848,17 +103,24 @@ async function renderPatternCheck() {
     })
   );
 
-  const responses = await DB.getAllResponses();
-  const recentKeys = (await DB.getMeta("recentPatternCheckKeys", [])) || [];
-  const triad = pickTriad(responses, recentKeys);
+  const recentKeys = (await DB.getMeta("recentTriadKeys", [])) || [];
+  const recentLogics = (await DB.getMeta("recentLogics", [])) || [];
+  const triad = await pickTriad(recentKeys, recentLogics);
 
   const puzzleBox = el("div", { class: "triad-box" });
   wrap.appendChild(puzzleBox);
 
   function renderPuzzle() {
     puzzleBox.innerHTML = "";
-    if (triad.source === "self") {
-      puzzleBox.appendChild(el("div", { class: "dg-label", text: "FROM YOUR OWN ARCHIVE — CONTEXT STRIPPED" }));
+    const tag =
+      triad.source === "ai"
+        ? "AI-GENERATED (GROQ)"
+        : triad.aiError
+        ? "OFFLINE BANK — AI GENERATION FAILED"
+        : "OFFLINE BANK";
+    puzzleBox.appendChild(el("div", { class: "dg-label", text: tag }));
+    if (triad.aiError) {
+      puzzleBox.appendChild(el("p", { class: "muted small", text: triad.aiError }));
     }
 
     const board = el("div", { class: "triad-board" });
@@ -887,9 +149,8 @@ async function renderPatternCheck() {
       svg.appendChild(line);
     }
 
-    function commitPair() {
+    async function commitPair() {
       answered = true;
-      const selectedCanonical = selected.map((c) => Number(c.dataset.canonical));
       const unselectedCard = cards.find((c) => !selected.includes(c));
       const unselectedCanonical = Number(unselectedCard.dataset.canonical);
       const correct = unselectedCanonical === triad.oddIndex;
@@ -904,42 +165,50 @@ async function renderPatternCheck() {
         id: `pc_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
         timestamp: Date.now(),
         source: triad.source,
-        triadKey: triad.triadKey,
-        chosenIndex: unselectedCanonical,
+        modelUsed: triad.modelUsed || null,
+        stances: triad.stances,
         oddIndex: triad.oddIndex,
-        correct,
+        chosenUnselectedIndex: unselectedCanonical,
         sharedLogic: triad.sharedLogic,
+        explanation: triad.explanation,
+        correct,
+        note: "",
       };
-      DB.addPatternCheck(check);
+      await DB.addPatternCheck(check);
       const updatedKeys = [triad.triadKey, ...recentKeys].slice(0, RECENT_TRIAD_KEYS_TO_TRACK);
-      DB.putMeta("recentPatternCheckKeys", updatedKeys);
+      await DB.putMeta("recentTriadKeys", updatedKeys);
+      const updatedLogics = [triad.sharedLogic, ...recentLogics].slice(0, RECENT_TRIAD_KEYS_TO_TRACK);
+      await DB.putMeta("recentLogics", updatedLogics);
 
       const result = el("div", { class: `triad-result ${correct ? "triad-result-correct" : "triad-result-incorrect"}` });
       result.appendChild(el("div", { class: "dg-label", text: correct ? "CONNECTED CORRECTLY" : "NOT QUITE" }));
       result.appendChild(el("p", { text: `Shared logic: ${triad.sharedLogic}.` }));
       result.appendChild(el("p", { class: "muted small", text: triad.explanation }));
+      const footnote = aiModelFootnote(triad.modelUsed);
+      if (footnote) result.appendChild(footnote);
       puzzleBox.appendChild(result);
 
-      const actions = el("div", { class: "done-actions" });
-      actions.appendChild(el("button", { class: "btn primary", text: "Next puzzle", onclick: () => route() }));
-      actions.appendChild(
+      const noteRow = el("div", { class: "field-row" });
+      const noteInput = el("textarea", { class: "note-input", rows: "2", placeholder: "What made this tricky or obvious? (optional)" });
+      noteRow.appendChild(noteInput);
+      puzzleBox.appendChild(noteRow);
+      puzzleBox.appendChild(
         el("button", {
           class: "btn secondary",
-          text: "Turn this into a response",
+          text: "Save note",
           onclick: async () => {
-            let dilemma = null;
-            if (triad.relatedDilemmaId) dilemma = dilemmaById(triad.relatedDilemmaId);
-            if (!dilemma) dilemma = pickTodaysDilemma(await DB.getAllResponses());
-            await DB.putMeta("pendingDilemmaId", dilemma.id);
-            state.currentDilemma = dilemma;
-            state.stage = "position";
-            state.draftThirdPosition = "";
-            state.view = "today";
-            route();
+            await updatePatternCheckNote(check.id, noteInput.value.trim());
+            noteRow.remove();
           },
         })
       );
+
+      const actions = el("div", { class: "done-actions" });
+      actions.appendChild(el("button", { class: "btn primary", text: "Next puzzle", onclick: () => route() }));
       puzzleBox.appendChild(actions);
+
+      const unlock = await checkMilestonesAndMaybeUnlock();
+      if (unlock) showUnlockModal(unlock);
     }
 
     order.forEach((canonicalIndex) => {
@@ -974,14 +243,158 @@ async function renderPatternCheck() {
       : `${checks.length} puzzle(s) solved, ${Math.round((checks.filter((c) => c.correct).length / checks.length) * 100)}% correct.`;
   wrap.appendChild(el("p", { class: "muted small", text: statsLine }));
 
-  const modifier = computeAccuracyModifier(checks);
-  if (modifier) {
+  return wrap;
+}
+
+async function updatePatternCheckNote(id, note) {
+  // db.js only exposes add(); patternChecks are keyed by id, so a direct
+  // put() through the same store works as an upsert/update here.
+  const dbHandle = await openDB();
+  const t = dbHandle.transaction(["patternChecks"], "readwrite");
+  return new Promise((resolve, reject) => {
+    const store = t.objectStore("patternChecks");
+    const getReq = store.get(id);
+    getReq.onsuccess = () => {
+      const record = getReq.result;
+      if (record) {
+        record.note = note;
+        store.put(record);
+      }
+    };
+    t.oncomplete = () => resolve();
+    t.onerror = () => reject(t.error);
+  });
+}
+
+function showUnlockModal(unlock) {
+  const overlay = el("div", { class: "modal-overlay" });
+  const modal = el("div", { class: "modal" });
+  const headerText = unlock.timeBased ? "PERIODIC RECHECK — NEW EVIDENCE" : `MILESTONE — ${unlock.milestone} ATTEMPTS`;
+  modal.appendChild(el("div", { class: "modal-header", text: headerText }));
+  if (unlock.discoveries.length === 0) {
+    modal.appendChild(el("p", { text: "No stable pattern has emerged yet. That itself is worth noting — keep going." }));
+  } else {
+    modal.appendChild(el("p", { class: "muted", text: `${unlock.discoveries.length} discovery(ies) unlocked or updated:` }));
+    const list = el("div", { class: "discovery-list" });
+    for (const d of unlock.discoveries) list.appendChild(renderDiscoveryCard(d));
+    modal.appendChild(list);
+  }
+  modal.appendChild(el("button", { class: "btn primary", text: "Close", onclick: () => overlay.remove() }));
+  overlay.appendChild(modal);
+  document.body.appendChild(overlay);
+}
+
+// ---------- ARCHIVE ----------
+
+async function renderArchive() {
+  const checks = (await DB.getAllPatternChecks()).slice().reverse();
+  const wrap = el("div", { class: "panel" });
+  wrap.appendChild(el("h2", { text: "Archive" }));
+  if (checks.length === 0) {
+    wrap.appendChild(el("p", { class: "muted", text: "No entries yet." }));
+    return wrap;
+  }
+
+  const searchRow = el("div", { class: "field-row" });
+  const search = el("input", { type: "text", placeholder: "Search archive…", class: "search-input" });
+  searchRow.appendChild(search);
+  wrap.appendChild(searchRow);
+
+  const list = el("div", { class: "archive-list" });
+  wrap.appendChild(list);
+
+  function draw() {
+    list.innerHTML = "";
+    const q = search.value.trim().toLowerCase();
+    for (const c of checks) {
+      const hay = `${c.sharedLogic} ${c.stances.join(" ")} ${c.note || ""}`.toLowerCase();
+      if (q && !hay.includes(q)) continue;
+      const dc = colorForLabel(c.sharedLogic);
+      const card = el("div", { class: "archive-card", style: `--dc: ${dc}` });
+      card.appendChild(
+        el("div", { class: "archive-card-header" }, [
+          el("span", { class: "case-domain", text: c.sharedLogic }),
+          el("span", { class: "muted small", text: new Date(c.timestamp).toLocaleDateString() }),
+        ])
+      );
+      c.stances.forEach((s, i) => {
+        const label = i === c.oddIndex ? "ODD ONE OUT" : "PAIR";
+        card.appendChild(el("p", { class: "archive-positions", text: `${label}: ${s}` }));
+      });
+      const meta = el("div", { class: "archive-meta" });
+      meta.appendChild(el("span", { class: "pill", style: `--mc: ${c.correct ? "var(--accent-2)" : "var(--danger)"}`, text: c.correct ? "correct" : "missed" }));
+      meta.appendChild(el("span", { class: "pill muted-pill", text: c.source === "ai" ? "ai-generated" : "offline bank" }));
+      card.appendChild(meta);
+      if (c.note) card.appendChild(el("p", { class: "archive-note", text: `“${c.note}”` }));
+      list.appendChild(card);
+    }
+    if (!list.children.length) list.appendChild(el("p", { class: "muted", text: "No matches." }));
+  }
+  search.addEventListener("input", draw);
+  draw();
+  return wrap;
+}
+
+// ---------- DISCOVERIES ----------
+
+function renderDiscoveryCard(d) {
+  const card = el("div", { class: `discovery-card type-${d.type.toLowerCase()}` });
+  card.appendChild(el("div", { class: "discovery-type", text: d.type.replaceAll("_", " ") }));
+  card.appendChild(el("h4", { class: "discovery-title", text: d.title }));
+  card.appendChild(el("p", { class: "discovery-pattern", text: d.observedPattern }));
+
+  const grid = el("div", { class: "discovery-grid" });
+  grid.appendChild(el("div", { class: "dg-label", text: "EVIDENCE COUNT" }));
+  grid.appendChild(el("div", { text: String(d.evidenceCount) }));
+  if (d.domains && d.domains.length) {
+    grid.appendChild(el("div", { class: "dg-label", text: "CATEGORIES" }));
+    grid.appendChild(el("div", { text: d.domains.join(", ") }));
+  }
+  grid.appendChild(el("div", { class: "dg-label", text: "CONFIDENCE" }));
+  grid.appendChild(el("div", { text: d.confidence }));
+  card.appendChild(grid);
+
+  if (d.examples && d.examples.length) {
+    const ex = el("div", { class: "discovery-examples" });
+    ex.appendChild(el("div", { class: "dg-label", text: "EXAMPLES" }));
+    for (const e of d.examples) ex.appendChild(el("p", { class: "example-snippet", text: e }));
+    card.appendChild(ex);
+  }
+
+  card.appendChild(el("p", { class: "discovery-alt" }, [el("strong", { text: "Alternative explanation: " }), document.createTextNode(d.alternativeExplanation)]));
+  card.appendChild(el("p", { class: "discovery-disconfirm" }, [el("strong", { text: "What would disconfirm this: " }), document.createTextNode(d.disconfirm)]));
+  return card;
+}
+
+async function renderDiscoveries() {
+  const wrap = el("div", { class: "panel" });
+  wrap.appendChild(el("h2", { text: "Discoveries" }));
+  const discoveries = (await DB.getAllDiscoveries()).sort((a, b) => b.computedAt - a.computedAt);
+  const checks = await DB.getAllPatternChecks();
+  const schedule = nextMilestoneSchedule(checks.length);
+  const nextMilestone = schedule.find((m) => m > checks.length);
+  wrap.appendChild(
+    el("p", {
+      class: "muted small",
+      text: `${checks.length} attempts logged. Next check at ${nextMilestone ?? "—"} attempts, or sooner if it's been a few days since the last check.`,
+    })
+  );
+
+  const nearMisses = computeNearMisses(checks);
+  if (nearMisses.length) {
     const section = el("div", { class: "near-miss-section" });
-    section.appendChild(el("div", { class: "dg-label", text: "A SMALL PATTERN IN YOUR PATTERN-SPOTTING" }));
-    section.appendChild(el("p", { text: modifier }));
+    section.appendChild(el("div", { class: "dg-label", text: "BUILDING EVIDENCE — not yet confirmed" }));
+    for (const nm of nearMisses) {
+      section.appendChild(el("div", { class: "near-miss-item" }, [el("strong", { text: nm.label }), el("p", { text: nm.detail })]));
+    }
     wrap.appendChild(section);
   }
 
+  if (discoveries.length === 0) {
+    wrap.appendChild(el("p", { class: "muted", text: "Nothing confirmed yet. Discoveries require repeated evidence, not single answers." }));
+  } else {
+    for (const d of discoveries) wrap.appendChild(renderDiscoveryCard(d));
+  }
   return wrap;
 }
 
@@ -990,17 +403,14 @@ async function renderPatternCheck() {
 async function renderDataView() {
   const wrap = el("div", { class: "panel" });
   wrap.appendChild(el("h2", { text: "Data / Export" }));
-  const responses = await DB.getAllResponses();
+  const checks = await DB.getAllPatternChecks();
   wrap.appendChild(
-    el("p", {
-      class: "muted",
-      text: `${responses.length} responses stored locally in this browser's IndexedDB. Nothing is ever sent anywhere, unless you opt into AI Assist below.`,
-    })
+    el("p", { class: "muted", text: `${checks.length} attempts stored locally in this browser's IndexedDB. Nothing is ever sent anywhere, unless you opt into AI Assist below.` })
   );
 
   const row = el("div", { class: "data-actions" });
   row.appendChild(el("button", { class: "btn secondary", text: "Export full JSON backup", onclick: exportJSON }));
-  row.appendChild(el("button", { class: "btn secondary", text: "Export responses as CSV", onclick: exportCSV }));
+  row.appendChild(el("button", { class: "btn secondary", text: "Export attempts as CSV", onclick: exportCSV }));
 
   const importLabel = el("label", { class: "btn secondary file-btn", text: "Import JSON backup" });
   const fileInput = el("input", { type: "file", accept: "application/json", class: "hidden" });
@@ -1010,7 +420,7 @@ async function renderDataView() {
     if (!confirm("Importing will REPLACE all current data with the contents of this file. Continue?")) return;
     try {
       const n = await importJSONFile(file);
-      alert(`Imported ${n} responses.`);
+      alert(`Imported ${n} attempts.`);
       route();
     } catch (err) {
       alert("Import failed: " + err.message);
@@ -1024,7 +434,7 @@ async function renderDataView() {
       class: "btn danger",
       text: "Delete all data",
       onclick: async () => {
-        if (!confirm("This permanently deletes every response, discovery, and setting stored in this browser. This cannot be undone. Continue?")) return;
+        if (!confirm("This permanently deletes every attempt, discovery, and setting stored in this browser. This cannot be undone. Continue?")) return;
         if (!confirm("Really sure? Type OK in the next prompt to confirm.")) return;
         const val = prompt('Type "DELETE" to confirm permanent deletion:');
         if (val !== "DELETE") return;
@@ -1036,17 +446,12 @@ async function renderDataView() {
   );
 
   wrap.appendChild(row);
-
   wrap.appendChild(el("div", { class: "divider" }));
   wrap.appendChild(renderAIAssistSection());
-
   wrap.appendChild(el("div", { class: "divider" }));
-  wrap.appendChild(el("h3", { text: "Dilemma bank" }));
+  wrap.appendChild(el("h3", { text: "Offline fallback bank" }));
   wrap.appendChild(
-    el("p", {
-      class: "muted small",
-      text: `${DILEMMAS.length} dilemmas across ${DOMAINS.length} domains, defined in js/dilemmas.js. See the README for how to add your own.`,
-    })
+    el("p", { class: "muted small", text: `${ODD_ONE_OUT.length} hand-written triads, defined in js/oddOneOut.js. Used whenever AI Assist is off or unavailable. See the README for how to add your own.` })
   );
 
   return wrap;
@@ -1054,12 +459,12 @@ async function renderDataView() {
 
 function renderAIAssistSection() {
   const section = el("div", {});
-  section.appendChild(el("h3", { text: "AI Assist (optional, off by default)" }));
+  section.appendChild(el("h3", { text: "AI Assist — Pattern Generation (optional, off by default)" }));
   section.appendChild(
     el("p", {
       class: "warning",
       text:
-        "Turning this on sends the text of each response you file (both positions, your third position, and your mechanism tag) to Groq's API, using your own key, directly from this browser. Everything else about this app stays local — this is the one exception. Leave it off if you don't want any of your writing to leave this device.",
+        "Turning this on sends a request to Groq's API, using your own key, directly from this browser, every time a new puzzle is generated. Everything else about this app stays local — this is the one exception. Leave it off to use only the offline hand-written bank.",
     })
   );
 
@@ -1069,7 +474,7 @@ function renderAIAssistSection() {
   const enableCheckbox = el("input", { type: "checkbox" });
   enableCheckbox.checked = settings.enabled;
   enableRow.appendChild(enableCheckbox);
-  enableRow.appendChild(el("label", { text: "Enable AI micro-observations + periodic synthesis" }));
+  enableRow.appendChild(el("label", { text: "Enable AI-generated puzzles" }));
   section.appendChild(enableRow);
 
   const keyRow = el("div", { class: "field-row" });
@@ -1088,7 +493,7 @@ function renderAIAssistSection() {
   section.appendChild(
     el("p", {
       class: "muted small",
-      text: `Default is ${GROQ_DEFAULT_MODEL}. If that model 404s or hits a rate limit, requests automatically fall through to ${GROQ_FALLBACK_MODELS.join(" then ")} before giving up — you'll see a small note when a fallback actually answered. Groq's catalog changes independently of this app, so use "Check available models" below with your key for the current, authoritative list rather than trusting any hardcoded default.`,
+      text: `Default is ${GROQ_DEFAULT_MODEL}. If that model 404s or hits a rate limit, requests automatically fall through to ${GROQ_FALLBACK_MODELS.join(" then ")} before giving up. Groq's catalog changes independently of this app, so use "Check available models" below with your key for the current, authoritative list.`,
     })
   );
 
@@ -1152,16 +557,8 @@ function showUpdateBanner() {
   if (document.getElementById("update-banner")) return;
   const banner = el("div", { id: "update-banner", class: "update-banner" }, [
     el("span", { text: "A new version of this app is ready." }),
-    el("button", {
-      class: "btn primary",
-      text: "Refresh",
-      onclick: () => location.reload(),
-    }),
-    el("button", {
-      class: "btn secondary",
-      text: "Later",
-      onclick: () => banner.remove(),
-    }),
+    el("button", { class: "btn primary", text: "Refresh", onclick: () => location.reload() }),
+    el("button", { class: "btn secondary", text: "Later", onclick: () => banner.remove() }),
   ]);
   document.body.appendChild(banner);
 }
@@ -1171,10 +568,6 @@ async function boot() {
     navigator.serviceWorker
       .register("service-worker.js")
       .then((reg) => {
-        // A worker already controls this page and a NEW one just finished
-        // installing — that's an update, not a first install. Don't force
-        // a reload (you might be mid-way through writing something); show
-        // a banner instead and let the user pick when.
         reg.addEventListener("updatefound", () => {
           const incoming = reg.installing;
           if (!incoming) return;

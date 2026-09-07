@@ -5,22 +5,13 @@
   the ONLY place that ever talks to the internet, and it only runs if the
   user has explicitly enabled it and pasted in their own free Groq API key
   (groqcloud.com — not xAI's Grok). The key and the on/off switch live in
-  localStorage, never in IndexedDB, and are never included in the JSON/CSV
+  localStorage, never in IndexedDB, and are never included in the JSON
   export.
 
-  It does two things, both clearly separated from the deterministic
-  discovery engine in discovery.js:
-
-  1. MICRO-OBSERVATION — after you file a response, one short, concrete,
-     non-diagnostic remark about that single response (a phrasing choice,
-     a distinction drawn). Never personality language, never "you are X."
-  2. SYNTHESIS — every SYNTHESIS_EVERY_N micro-observations, a short prose
-     paragraph looking for a thread across the recent ones, with the same
-     hedging discipline as the rest of the app (explicit disconfirmation,
-     no invented threads when none is visible).
-
-  Both are stored labeled as AI-generated and rendered separately from the
-  evidence-gated discovery cards — informal commentary, not evidence.
+  Its one job: invent fresh Pattern Check triads on demand, so the puzzles
+  aren't limited to the ~18 hand-written ones in js/oddOneOut.js. When this
+  is off (or a request fails), js/patternCheck.js falls back to that bank
+  automatically — the app never depends on the network to function.
 */
 
 const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
@@ -39,7 +30,6 @@ const GROQ_DEFAULT_MODEL = "openai/gpt-oss-120b";
 // notice per their own docs), which is exactly why it's listed last, not
 // first — it's a safety net, not a default.
 const GROQ_FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.6-27b"];
-const SYNTHESIS_EVERY_N = 8;
 
 const GROQ_SETTINGS_KEY = "thirdPosition.groqSettings";
 
@@ -72,53 +62,36 @@ function groqIsActive() {
 }
 
 // openai/gpt-oss-* and qwen/qwen3.6-* are reasoning models: they spend part
-// of the completion budget "thinking" before emitting a final answer. Two
-// things follow from that, both load-bearing for why the first version of
-// this call kept coming back empty:
-//   1. `max_tokens` is the deprecated field name; Groq's current API (like
-//      OpenAI's) expects `max_completion_tokens`. Sending the old field name
-//      risks it being ignored/misapplied on these newer models.
-//   2. With no reasoning controls set, a small token budget can be entirely
-//      consumed by internal reasoning before any visible answer is emitted,
-//      leaving message.content empty — not a network or model-access
-//      failure, just starved of room to finish thinking.
-// Fixed by asking for low reasoning effort and a hidden reasoning channel
-// (only the final answer comes back in content, never the chain-of-thought),
-// giving a generous token budget on top of that, and stripping any <think>
-// tags defensively in case a given model doesn't honor "hidden".
+// of the completion budget "thinking" before emitting a final answer.
+// max_completion_tokens is the current field name (max_tokens is
+// deprecated); reasoning_effort/reasoning_format keep that thinking cheap
+// and out of the visible output. qwen3.6-27b only accepts "none"/"default"
+// for reasoning_effort (the low/medium/high scale is qwen3.8-only), so
+// that field is deliberately left unset for it.
 const GPT_OSS_PATTERN = /^openai\/gpt-oss-/i;
 const QWEN_PATTERN = /^qwen\//i;
 
 function stripReasoningArtifacts(text) {
   const cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
-  // Safety cap: the requested outputs are always short (~25-80 words). The
-  // message.reasoning fallback above, in particular, could in principle
-  // return much more than that — this keeps a rare edge case from dumping
-  // an unbounded wall of text into a UI built for one or two sentences.
-  return cleaned.length > 600 ? cleaned.slice(0, 600).trim() + "…" : cleaned;
+  return cleaned.length > 2000 ? cleaned.slice(0, 2000).trim() + "…" : cleaned;
 }
 
 // Single attempt against one specific model. Never throws — every failure
 // path returns { ok: false, status, error } so the fallback chain above it
 // can decide whether trying the next model is worth it.
-async function callGroqOnce(messages, { model, apiKey, maxTokens = 350, temperature = 0.4 }) {
+async function callGroqOnce(messages, { model, apiKey, maxTokens = 500, temperature = 0.9, json = false }) {
   const body = {
     model,
     messages,
     temperature,
     max_completion_tokens: maxTokens,
   };
+  if (json) body.response_format = { type: "json_object" };
   if (GPT_OSS_PATTERN.test(model)) {
-    // gpt-oss 20b/120b accept low/medium/high; "low" is plenty for a
-    // 25-word observation or an 80-word synthesis paragraph.
     body.reasoning_effort = "low";
-    body.reasoning_format = "hidden";
+    if (!json) body.reasoning_format = "hidden"; // JSON mode forces "parsed" automatically on Groq's side
   } else if (QWEN_PATTERN.test(model)) {
-    // qwen3.6-27b only accepts "none"/"default" for reasoning_effort (the
-    // low/medium/high scale is qwen3.8-only) — deliberately NOT setting
-    // "low" here, since that would 400 on this model and this is our last
-    // fallback with nowhere further to go.
-    body.reasoning_format = "hidden";
+    if (!json) body.reasoning_format = "hidden";
   }
 
   try {
@@ -167,7 +140,7 @@ async function callGroqOnce(messages, { model, apiKey, maxTokens = 350, temperat
 // else (bad key, network failure) is very unlikely to be fixed by switching
 // models, so it stops there and reports immediately instead of burning
 // through every fallback for no reason.
-async function callGroq(messages, { model, maxTokens = 350, temperature = 0.4 } = {}) {
+async function callGroq(messages, { model, maxTokens = 500, temperature = 0.9, json = false } = {}) {
   const settings = getGroqSettings();
   const apiKey = settings.apiKey.trim();
   if (!settings.enabled || !apiKey) return { ok: false, error: "AI assist is not enabled." };
@@ -177,7 +150,7 @@ async function callGroq(messages, { model, maxTokens = 350, temperature = 0.4 } 
 
   let lastResult = null;
   for (const candidate of chain) {
-    const result = await callGroqOnce(messages, { model: candidate, apiKey, maxTokens, temperature });
+    const result = await callGroqOnce(messages, { model: candidate, apiKey, maxTokens, temperature, json });
     if (result.ok) return result;
     lastResult = result;
     if (result.status !== 404 && result.status !== 429) break; // not a model problem — retrying elsewhere won't help
@@ -201,107 +174,70 @@ async function listAvailableGroqModels(apiKeyOverride) {
   }
 }
 
-async function requestMicroObservation(dilemma, response) {
-  if (!groqIsActive()) return null;
+const AI_TRIAD_SYSTEM_PROMPT =
+  "You invent puzzles for a pattern-recognition exercise called Pattern Check. Produce exactly one NEW triad: " +
+  "three short (1-2 sentence) statements about everyday judgment, ethics, relationships, work, creativity, " +
+  "trust, memory, or any domain you choose. Two of the three statements must share a specific, real, " +
+  "structural reasoning pattern — not just a similar topic or wording. For example: both judge by outcome " +
+  "rather than intent; both treat an exception as corrosive to a rule; both extend trust by default; both " +
+  "weigh present character over past history; both keep observation separate from interpretation. Invent a " +
+  "fresh angle each time — avoid obvious, cliché oppositions. The third statement should sound superficially " +
+  "similar in topic or tone but actually follow a different underlying logic; the difference must be a real " +
+  "reasoning distinction, not just a negation or a change in tone. Respond ONLY with a JSON object with " +
+  'exactly these keys: "stances" (an array of exactly 3 strings, in any order), "oddIndex" (the 0-based index ' +
+  'in that array of the statement that does NOT share the logic), "sharedLogic" (a short 4-8 word label for ' +
+  'what the other two share), "explanation" (one sentence on why the other two share it and this one doesn\'t). ' +
+  "No other text, no markdown, just the JSON object.";
 
-  const messages = [
-    {
-      role: "system",
-      content:
-        "You are a terse observational annotator for a personal reasoning journal called The Third Position. " +
-        "You will see one dilemma (two opposing positions) and the author's own 'third position' resolving it. " +
-        "Write exactly one short observation, at most 25 words, about a specific, concrete feature of HOW they " +
-        "reasoned in this single response — a phrasing choice, a distinction they drew, a move they made. " +
-        "Never diagnose personality. Never write 'you are' or trait labels. Never praise or evaluate quality. " +
-        "Never speculate beyond this one response. If nothing specific stands out, respond exactly with: " +
-        "'No distinct textual feature stood out here.' Output only the observation itself, nothing else.",
-    },
-    {
-      role: "user",
-      content:
-        `POSITION A: ${dilemma.positionA}\n` +
-        `POSITION B: ${dilemma.positionB}\n` +
-        `THIRD POSITION: ${response.thirdPosition}\n` +
-        `SELF-TAGGED MOVE: ${response.mechanism === "OTHER" ? response.mechanismOther : mechanismLabel(response.mechanism)}`,
-    },
-  ];
-
-  // Generous relative to the ~25-word answer we actually want: reasoning
-  // models spend part of this budget thinking even with reasoning_effort
-  // "low" and reasoning_format "hidden", so a tight limit here is exactly
-  // what produced empty responses before.
-  const result = await callGroq(messages, { maxTokens: 400, temperature: 0.5 });
-  if (!result.ok) return { error: result.error };
-
-  const note = {
-    id: `ai_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-    responseId: response.id,
-    dilemmaId: dilemma.id,
-    text: result.text,
-    modelUsed: result.modelUsed,
-    createdAt: Date.now(),
-  };
-  await DB.addAINote(note);
-  return note;
+function isValidAITriad(parsed) {
+  return (
+    parsed &&
+    Array.isArray(parsed.stances) &&
+    parsed.stances.length === 3 &&
+    parsed.stances.every((s) => typeof s === "string" && s.trim().length > 0) &&
+    Number.isInteger(parsed.oddIndex) &&
+    parsed.oddIndex >= 0 &&
+    parsed.oddIndex <= 2 &&
+    typeof parsed.sharedLogic === "string" &&
+    parsed.sharedLogic.trim().length > 0 &&
+    typeof parsed.explanation === "string" &&
+    parsed.explanation.trim().length > 0
+  );
 }
 
-async function maybeSynthesize() {
-  if (!groqIsActive()) return null;
+// Returns a validated triad shape ({stances, oddIndex, sharedLogic,
+// explanation, modelUsed}) or { error } — never throws, never returns a
+// malformed triad for the caller to render.
+async function generateAITriad(recentLogics = []) {
+  if (!groqIsActive()) return { error: "AI assist is not enabled." };
 
-  const notes = await DB.getAllAINotes();
-  const usableNotes = notes.filter((n) => !/^no distinct textual feature/i.test(n.text));
-  if (usableNotes.length === 0) return null;
-
-  const lastSynthesisAt = (await DB.getMeta("lastAISynthesisNoteCount", 0)) || 0;
-  if (usableNotes.length - lastSynthesisAt < SYNTHESIS_EVERY_N) return null;
-
-  const recent = usableNotes.slice(-SYNTHESIS_EVERY_N * 2); // a little more context than the strict threshold
-  const responses = await DB.getAllResponses();
-  const enriched = responses.map((r) => ({ r, d: dilemmaById(r.dilemmaId) })).filter((x) => x.d);
-  const mechCounts = new Map();
-  const domainCounts = new Map();
-  for (const { r, d } of enriched) {
-    const label = r.mechanism === "OTHER" ? r.mechanismOther : mechanismLabel(r.mechanism);
-    mechCounts.set(label, (mechCounts.get(label) || 0) + 1);
-    domainCounts.set(d.domain, (domainCounts.get(d.domain) || 0) + 1);
-  }
-  const topMechs = [...mechCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} (${v})`).join(", ");
-  const topDomains = [...domainCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, v]) => `${k} (${v})`).join(", ");
+  const avoidLine = recentLogics.length
+    ? `Avoid repeating these recently-used shared-logic angles: ${recentLogics.join("; ")}.`
+    : "";
 
   const messages = [
-    {
-      role: "system",
-      content:
-        "You write brief, hedged synthesis notes for a personal reasoning journal. You will be given a list of " +
-        "short observations made about someone's individual responses over time, plus their most common structural " +
-        "moves and domains. Write one short paragraph, at most 80 words, noting any thread connecting these " +
-        "observations, if one is visible. Use cautious language ('seems to', 'may', 'across these notes'). " +
-        "Explicitly name one thing that would disconfirm the thread you noticed, in the same paragraph or a short " +
-        "second sentence. If no thread is visible, say so plainly instead of inventing one. Never use " +
-        "personality-trait labels or diagnostic language ('you are an X person').",
-    },
-    {
-      role: "user",
-      content:
-        `RECENT OBSERVATIONS:\n${recent.map((n) => `- ${n.text}`).join("\n")}\n\n` +
-        `MOST COMMON MOVES OVERALL: ${topMechs || "—"}\n` +
-        `MOST COMMON DOMAINS OVERALL: ${topDomains || "—"}`,
-    },
+    { role: "system", content: AI_TRIAD_SYSTEM_PROMPT },
+    { role: "user", content: `Generate one triad now. ${avoidLine}`.trim() },
   ];
 
-  const result = await callGroq(messages, { maxTokens: 700, temperature: 0.5 });
+  const result = await callGroq(messages, { maxTokens: 600, temperature: 0.95, json: true });
   if (!result.ok) return { error: result.error };
 
-  const entry = {
-    id: `disc__AI_SYNTHESIS__${Date.now()}`,
-    type: "AI_SYNTHESIS",
-    title: "AI synthesis (Groq) — informal, not evidence-gated",
-    text: result.text,
-    basedOnCount: recent.length,
+  let parsed;
+  try {
+    parsed = JSON.parse(result.text);
+  } catch {
+    return { error: "Groq's response wasn't valid JSON — falling back to the offline bank." };
+  }
+  if (!isValidAITriad(parsed)) {
+    return { error: "Groq's response was missing required fields — falling back to the offline bank." };
+  }
+
+  return {
+    stances: parsed.stances.map((s) => s.trim()),
+    oddIndex: parsed.oddIndex,
+    sharedLogic: parsed.sharedLogic.trim(),
+    explanation: parsed.explanation.trim(),
     modelUsed: result.modelUsed,
-    computedAt: Date.now(),
   };
-  await DB.saveDiscoveries([entry]);
-  await DB.putMeta("lastAISynthesisNoteCount", usableNotes.length);
-  return entry;
 }

@@ -15,23 +15,19 @@ function downloadBlob(filename, mimeType, content) {
 }
 
 async function exportJSON() {
-  const responses = await DB.getAllResponses();
-  const discoveries = await DB.getAllDiscoveries();
-  const aiNotes = await DB.getAllAINotes();
   const patternChecks = await DB.getAllPatternChecks();
+  const discoveries = await DB.getAllDiscoveries();
   const meta = await DB.getAllMeta();
   const payload = {
     app: "the-third-position",
-    exportVersion: 3,
+    exportVersion: 4,
     exportedAt: new Date().toISOString(),
-    responses,
-    discoveries,
-    aiNotes,
     patternChecks,
+    discoveries,
     meta,
   };
   const stamp = new Date().toISOString().slice(0, 10);
-  downloadBlob(`third-position-export-${stamp}.json`, "application/json", JSON.stringify(payload, null, 2));
+  downloadBlob(`pattern-check-export-${stamp}.json`, "application/json", JSON.stringify(payload, null, 2));
   // Deliberately excluded: the Groq API key and AI-Assist on/off toggle,
   // which live in localStorage, not IndexedDB — a backup file should never
   // carry a credential, and each browser/device needs its own key anyway.
@@ -44,47 +40,32 @@ function csvEscape(value) {
 }
 
 async function exportCSV() {
-  const responses = await DB.getAllResponses();
-  const headers = [
-    "id",
-    "timestamp",
-    "date",
-    "dilemmaId",
-    "domain",
-    "positionA",
-    "positionB",
-    "thirdPosition",
-    "mechanism",
-    "mechanismOther",
-    "confidence",
-    "difficulty",
-    "note",
-  ];
+  const checks = await DB.getAllPatternChecks();
+  const headers = ["id", "timestamp", "date", "source", "modelUsed", "stance0", "stance1", "stance2", "oddIndex", "chosenUnselectedIndex", "sharedLogic", "correct", "note"];
   const rows = [headers.join(",")];
-  for (const r of responses) {
-    const d = dilemmaById(r.dilemmaId) || {};
+  for (const c of checks) {
     rows.push(
       [
-        r.id,
-        r.timestamp,
-        new Date(r.timestamp).toISOString(),
-        r.dilemmaId,
-        d.domain || "",
-        d.positionA || "",
-        d.positionB || "",
-        r.thirdPosition || "",
-        r.mechanism || "",
-        r.mechanismOther || "",
-        r.confidence ?? "",
-        r.difficulty ?? "",
-        r.note || "",
+        c.id,
+        c.timestamp,
+        new Date(c.timestamp).toISOString(),
+        c.source,
+        c.modelUsed || "",
+        c.stances?.[0] || "",
+        c.stances?.[1] || "",
+        c.stances?.[2] || "",
+        c.oddIndex,
+        c.chosenUnselectedIndex,
+        c.sharedLogic || "",
+        c.correct,
+        c.note || "",
       ]
         .map(csvEscape)
         .join(",")
     );
   }
   const stamp = new Date().toISOString().slice(0, 10);
-  downloadBlob(`third-position-responses-${stamp}.csv`, "text/csv", rows.join("\n"));
+  downloadBlob(`pattern-check-attempts-${stamp}.csv`, "text/csv", rows.join("\n"));
 }
 
 function importJSONFile(file) {
@@ -93,17 +74,15 @@ function importJSONFile(file) {
     reader.onload = async () => {
       try {
         const data = JSON.parse(reader.result);
-        if (!data || !Array.isArray(data.responses)) {
-          throw new Error("This file doesn't look like a Third Position export.");
+        if (!data || !Array.isArray(data.patternChecks)) {
+          throw new Error("This file doesn't look like a Pattern Check export.");
         }
         await DB.replaceAll({
-          responses: data.responses,
+          patternChecks: data.patternChecks,
           discoveries: Array.isArray(data.discoveries) ? data.discoveries : [],
           meta: Array.isArray(data.meta) ? data.meta : [],
-          aiNotes: Array.isArray(data.aiNotes) ? data.aiNotes : [],
-          patternChecks: Array.isArray(data.patternChecks) ? data.patternChecks : [],
         });
-        resolve(data.responses.length);
+        resolve(data.patternChecks.length);
       } catch (err) {
         reject(err);
       }

@@ -1,7 +1,7 @@
 {
   "name": "The Third Position",
   "short_name": "3rdPosition",
-  "description": "A longitudinal contradiction experiment for discovering how you actually think.",
+  "description": "A longitudinal pattern-recognition experiment for discovering how you actually think.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

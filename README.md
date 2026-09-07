@@ -1,16 +1,19 @@
 # The Third Position
 
-A longitudinal contradiction experiment for discovering how you actually think.
+A longitudinal pattern-recognition experiment for discovering how you actually think.
 
-This is not a personality quiz, a journal, a mood tracker, or a chatbot. Each day
-it gives you two genuinely opposing, defensible positions and asks you to construct
-a **third position** that preserves what's valid in both — not a compromise, a
-resolution with a specific structural shape. Over months, it accumulates evidence
-about *how* you resolve tension: which moves you reach for, where they change by
-domain, where you contradict yourself, and where no single rule has ever emerged.
+Every session shows you three short stances. Two of them secretly share a
+real underlying reasoning pattern; one doesn't. You tap the two that belong
+together, connecting them with a string — whichever one is left over is
+revealed as the odd one out. That's it. Over months, the app studies not
+which side of anything you're on, but *what kind of reasoning connections
+you reliably spot, and which ones you miss* — accumulating evidence about
+that rather than asserting it after one good (or bad) guess.
 
-Everything runs entirely in your browser. There is no server, no account, no
-AI in the loop, no analytics, and no cost. Your responses never leave the device.
+Everything runs entirely in your browser. There is no required server, no
+account, and normal use costs nothing. The one optional exception — AI-
+generated puzzles via your own free Groq API key — is off by default and
+described in full below.
 
 ## Running it locally
 
@@ -21,281 +24,153 @@ python3 -m http.server 8000
 # then open http://localhost:8000/
 ```
 
-Or just open `index.html` directly in a browser (IndexedDB and the service
+Or open `index.html` directly in a browser (IndexedDB and the service
 worker both work from `file://` in most browsers, though a local server is
 more reliable, especially for the installable/offline behavior).
 
 On an iPad: open it in Safari, tap Share → "Add to Home Screen" to install it
-as a standalone app. It works fully offline after the first load.
+as a standalone app. It works fully offline after the first load, using the
+hand-written fallback bank (see below) — the AI layer is the only thing
+that needs a network connection, and only when you've turned it on.
 
-## How the flow works
+## How it works
 
-1. **Contradiction** shows one dilemma: Position A, Position B, both
-   deliberately defensible.
-2. You write a third position (minimum length enforced, and pure "both are
-   partly right"-style non-answers are rejected — you have to name an actual
-   move).
-3. You tag **what kind of move you made** (Condition, Threshold, Sequence,
-   Different Levels, Different Functions, Reversibility, Control/Agency,
-   Feedback Loop, Context, New Variable, Preserve Contradiction, or Other).
-4. Optionally: confidence, difficulty, and a one-line note on why it interested
-   or bothered you.
-5. After filing, you land on a "Filed." screen with a couple of cheap,
-   ungated bookkeeping tags (e.g. "3rd time using Condition," "first entry in
-   classification") and two buttons: **Answer another** or **Stop for now**.
+1. Three stances appear as loosely pinned cards on a board — not a stacked
+   list, deliberately, since a list-of-options felt like every other choice
+   in the app.
+2. Tap the two that share a real underlying logic. A string is drawn
+   between them live.
+3. Whichever card you didn't touch is revealed as either the genuine odd
+   one out (green string, you got it) or not (red string, the true odd one
+   gets highlighted amber either way, so you learn the answer regardless).
+4. You can optionally leave a one-line note on why it was tricky or
+   obvious.
+5. Tap "Next puzzle" and go again — there's no daily cap, no pacing gate on
+   this loop. What accumulates slowly is the evidence in **Discoveries**,
+   not the ability to play.
 
-There is no once-a-day cap — you can answer as many as you want in one
-sitting via "Answer another." What actually paces the experience is the
-discovery gate (below) and the twin-spacing rule: dilemmas that share a
-`twinGroup` are deliberately kept at least ~10 real days apart, however fast
-you're otherwise answering, so structural-twin reveals don't get cheapened
-by speed-running the bank.
+## Where puzzle content comes from
 
-The dilemma bank cycles through domains rather than repeating one; once
-you've seen every dilemma at least once, it starts resurfacing older ones,
-favoring whichever you haven't seen in the longest time.
+**Hybrid, and AI is preferred when it's on.** Every puzzle request:
 
-## Where the dilemma bank lives
+1. If AI Assist is enabled (see below), asks Groq to invent a brand new
+   triad on the spot — unlimited variety, any domain, a fresh angle each
+   time.
+2. If AI Assist is off, or that request fails or returns something
+   malformed, falls back automatically to the hand-written bank in
+   `js/oddOneOut.js` (18 triads to start). The app never depends on the
+   network to function; a failed AI call is silently absorbed and you see
+   an offline-bank puzzle instead, with a small note saying so.
 
-`js/dilemmas.js`. It's a plain JavaScript array — no build step, no schema
-migration. Each dilemma looks like this:
+### Adding to the offline bank
+
+`js/oddOneOut.js` is a plain array, no build step, self-service to extend.
+Each entry:
 
 ```js
 {
-  id: "d001",
-  domain: "knowledge & evidence",
-  positionA: "Keep researching until the contradictions in the evidence are resolved.",
-  positionB: "Act on the strongest available evidence despite unresolved uncertainty.",
-  tension: "when accumulated evidence becomes sufficient grounds for action",
-  constructs: ["sufficiency vs completeness", "provisional commitment"],
-  family: "SUFFICIENCY_TO_COMMIT",
-  twinGroup: "TWIN_SUFFICIENCY", // optional — see "structural twins" below
+  id: "oo019",            // unique, stable forever — never renumber
+  stances: ["…", "…", "…"], // exactly 3 short statements, canonical order
+  oddIndex: 2,             // which one (0-2) does NOT share the logic
+  sharedLogic: "a short label for what the other two share",
+  explanation: "one sentence on why, shown after the pick",
 }
 ```
 
-`tension`, `constructs`, `family`, and `twinGroup` are never shown to you
-before you answer — they're the hidden metadata the discovery engine uses
-afterward.
-
-### Adding your own dilemmas
-
-Append an object to the `DILEMMAS` array with a new unique `id` (never reuse
-or renumber an existing id — responses reference dilemmas by id, so changing
-one silently orphans past data). Everything else — selection, the archive,
-discovery detection, the contradiction map — picks up new entries
-automatically; there's nothing else to wire up.
-
-### Structural twins
-
-Some dilemmas share a `twinGroup` value even though they look nothing alike
-on the surface — e.g. "when is evidence sufficient to commit" (research),
-"when is trust sufficient without certainty" (relationships), and "when
-should a creative decision stop being revised" (creativity) are three
-surface-different dilemmas probing the same underlying tension
-(`TWIN_SUFFICIENCY`). The app deliberately avoids telling you they're
-related, and tries to space twins at least ~10 days apart when picking
-what to show you next. Once you've answered two or more dilemmas in the
-same twin group, **Pattern Lab** shows them side by side.
-
-## How insights are calculated
-
-All of the logic lives in `js/discovery.js`, in one function,
-`computeDiscoveries(responses)`. It runs over your full response history
-(each response enriched with its dilemma's hidden metadata) and looks for:
-
-- **Recurring mechanism** — the same move (e.g. "Condition") used 3+ times
-  across 2+ different domains. Reported as `OBSERVED_PATTERN`.
-- **Domain split** — two domains with enough responses each, where the
-  dominant move differs between them. Reported as `DOMAIN_SPLIT`. This is a
-  first-class, valid result — the engine is explicitly built to report "there
-  is no single rule here" rather than average the difference away.
-- **Structural twin comparison** — when you've answered 2+ dilemmas from the
-  same twin group, whether you resolved them the same way (`OBSERVED_PATTERN`)
-  or differently (`CONTRADICTION`).
-- **Evolution** — whether your dominant mechanism in the first half of your
-  history differs meaningfully from your most recent half.
-- **Outlier** — a single response using a mechanism that appears nowhere else
-  in an otherwise consistent log. Always reported at `low` confidence, as a
-  single data point.
-- **Open mystery** — a tension (structural `family`) you've faced 3+ times
-  with a different mechanism nearly every time (high entropy of mechanism
-  choice). Reported as an unresolved question, not a hidden pattern you
-  haven't noticed.
-
-Every insight carries: observed pattern, evidence count, domains, any
-counterexamples, a confidence label (`low` / `moderate` / `high` — never
-certainty), example responses, an alternative (competing, more boring)
-explanation of the same data, and what future evidence would disconfirm it.
-Nothing is inferred from a single response except an `OUTLIER`, and that is
-explicitly labeled low-confidence for exactly that reason.
-
-Discoveries are (re)computed and saved when **either** of two gates trips,
-whichever comes first:
-
-- a response-count milestone — 5, 12, 25, 50, 100, then every 50 after — or
-- at least 4 days have passed since the last check, provided at least one
-  new response came in since then.
-
-The first gate means a burst of answers in one sitting still gets reviewed
-promptly rather than waiting on a big round number that a slow, steady
-trickle of responses might not reach for weeks. The second gate means the
-reverse: even a slow trickle gets revisited every few days rather than
-stalling indefinitely between milestones. A recheck that finds nothing new
-or grown stays silent — you're only interrupted when something actually
-changed. You can always see everything computed so far on the
-**Discoveries** page, which also shows every near-miss short of confirmation
-in a "Building Evidence" section (see below).
-
-### Building Evidence (near misses)
-
-Below the confirmed discoveries, the Discoveries page also shows cheap,
-ungated "one step short" signals — e.g. a mechanism used twice across two
-domains (needs a third to confirm as `OBSERVED_PATTERN`), one side of a
-structural twin pair answered with the other still pending, or a tension
-you've faced exactly twice. These carry no confidence claim and are never
-persisted or milestone-gated — they're recomputed live every time you open
-the page, purely as a "here's what's accumulating" signal so short, frequent
-use still feels like it's visibly building toward something between the
-real, evidence-gated discoveries.
-
-## Contradiction Map
-
-**Contradiction Map** draws a plain SVG, three concentric rings: domains
-(outer), structural families/tensions (middle), mechanisms (inner). Line
-thickness and opacity encode how often a domain or family co-occurred with a
-given mechanism; node size encodes frequency. No layout library or physics
-simulation is used — positions are computed deterministically
-(`js/map.js`) — so it's not the classic force-directed dance, but it needs no
-dependency and it's easy to reason about what it shows.
-
-## Pattern Check
-
-A second, deliberately different activity from the daily Contradiction flow —
-diagnosis instead of synthesis, and a different interaction shape on purpose
-so it doesn't just feel like the same task with different text. Three short
-stances appear as loosely pinned cards, not a stacked list. Two secretly
-share a real underlying logic; you tap those two to connect them with a
-string — the one left over is the odd one out. It lives in its own nav tab,
-on its own schedule — it doesn't gate or get gated by the daily dilemma's
-pacing.
-
-**Content is hybrid** (`js/patternCheck.js`):
-- Once your own Archive has at least two responses sharing a self-tagged
-  mechanism *and* at least one response tagged differently, the app can build
-  a triad straight from your own past answers — two `thirdPosition` texts
-  from the shared-mechanism group, one from outside it, all stripped of
-  domain/positions/mechanism labels so it's genuinely blind. When eligible,
-  this is preferred (~70% of the time) over the authored bank.
-- Otherwise — or the other ~30% of the time — a triad comes from the authored
-  bank in `js/oddOneOut.js` (18 to start, spanning intent-vs-outcome,
-  rule-vs-exception, loyalty-vs-truth, and more of the same structural-family
-  thinking the dilemma bank uses). Same self-service model as the dilemma
-  bank: append an entry with a unique `id`, three `stances`, an `oddIndex`,
-  and a `sharedLogic` label — nothing else to wire up.
-
-**After the pick:** a correct/incorrect reveal plus the shared logic and a
-one-line explanation — that's it by default, a quick standalone diagnosis
-that doesn't touch responses or the discovery engine. Every attempt is logged
-(`patternChecks` IndexedDB store) toward two things:
-- **Next puzzle**, or **turn this into a response** — routes into the normal
-  position → mechanism → file flow (for an authored triad, on the dilemma its
-  `relatedDilemmaId` points to; otherwise a fresh dilemma pick), producing a
-  real logged response like the main flow does.
-- Once you've solved at least 10 puzzles, a small cautious "modifier" line
-  appears — overall accuracy, and, if one `sharedLogic` category has enough
-  attempts and a meaningfully lower hit rate, a note about it. Same hedging
-  discipline as `discovery.js`: evidence count stated, no "you are" language,
-  gated behind a minimum sample size.
+The two non-odd stances need a *real* structural logic in common — intent
+vs. outcome, rule vs. exception, individual vs. system, and so on — not
+just similar wording or topic. A good triad should still take a moment to
+see through even once you're looking for it.
 
 ## Optional AI Assist (Groq)
 
-Everything above requires zero network access. There is exactly one opt-in
-exception, off by default: under **Data / Export → AI Assist**, you can paste
-in your own [Groq](https://console.groq.com) API key (Groq's cloud inference
-service — not xAI's "Grok" — currently has a genuinely free tier with
-generous daily limits on strong open models). Turning it on does two things,
-both handled in `js/groq.js`:
+Everything above works with zero network access. There is exactly one
+opt-in exception, off by default: under **Data / Export → AI Assist**, you
+can paste in your own [Groq](https://console.groq.com) API key (Groq's
+cloud inference service — not xAI's "Grok" — currently has a genuinely free
+tier with generous daily limits on strong open models). Turning it on makes
+every new puzzle request try Groq first, asking it to invent a fresh triad
+in the same shape as the offline bank, validated strictly (exactly 3
+stances, a valid index, non-empty labels) before it's ever shown to you —
+anything malformed is treated as a failure and falls back to the offline
+bank automatically.
 
-1. **Micro-observation** — one short (≤25 word), concrete, non-diagnostic
-   remark about a single response (a phrasing choice, a distinction drawn).
-   Never personality language, never a verdict on quality. This runs
-   automatically right after you file a new response, and you can also ask
-   for it on any **already-filed** response: every card in the **Archive**
-   gets an "Ask AI to weigh in" button once AI Assist is on, plus a
-   one-click "Ask AI to weigh in on all N unreviewed responses" action at
-   the top of the Archive to backfill your whole past history at once.
-   Already-reviewed responses get an "Ask AI again" button if you want a
-   second take.
-2. **Synthesis** — every 8 usable micro-observations (old or new, backfilled
-   or fresh — it doesn't distinguish), a short hedged paragraph looking for
-   a thread across the recent ones, with the same discipline as the rest of
-   the app: cautious wording, and an explicit statement of what would
-   disconfirm it. If no thread is visible, it says so instead of inventing
-   one.
+**The privacy tradeoff, stated plainly:** turning this on sends a request
+to Groq's API, using your own key, directly from your browser, each time a
+new puzzle is generated. There's still no backend — nothing else changes —
+but that one request does leave the device. Leave it off to use only the
+offline bank. The API key and the on/off toggle live in `localStorage` (not
+IndexedDB), are never included in JSON export, and are removable any time
+via "Forget saved key."
 
-**Model + automatic fallback:** the default is `openai/gpt-oss-120b`. If that
-model 404s (unavailable to your key) or hits a rate limit, requests fall
-through automatically to `openai/gpt-oss-20b`, then `qwen/qwen3.6-27b` (a
-Groq preview model, listed last on purpose since preview models can be
+**Model + automatic fallback:** the default is `openai/gpt-oss-120b`. If
+that model 404s (unavailable to your key) or hits a rate limit, requests
+fall through automatically to `openai/gpt-oss-20b`, then `qwen/qwen3.6-27b`
+(a Groq preview model, listed last on purpose since preview models can be
 pulled at short notice) — all defined in `js/groq.js`. Any other failure
 (bad key, network error) stops immediately rather than burning through the
-whole chain. A small note appears whenever a fallback actually answered
-instead of your configured model, so this never happens silently.
+whole chain. A small note appears on a puzzle whenever a fallback model
+actually answered instead of your configured one.
 
 These three models are all *reasoning* models — they spend part of their
-token budget "thinking" before writing a final answer, which is different
-from plain instruct models and needs a few things set correctly to avoid
-coming back empty: requests use the current `max_completion_tokens` field
-(not the deprecated `max_tokens`), set `reasoning_effort: "low"` and
-`reasoning_format: "hidden"` on gpt-oss models so only the final answer
-comes back, and use a generous token budget (400/700 tokens for the two
-call types, well above the actual ~25-80 word answer) so reasoning has room
-to finish before the budget runs out. `qwen/qwen3.6-27b` only supports
-`"none"`/`"default"` for `reasoning_effort` (not `"low"`), so that field is
-deliberately left unset on it. Any `<think>...</think>` reasoning that
-leaks into the response text anyway is stripped before display, and a
-truly empty response reports the API's `finish_reason` so the actual cause
-is visible rather than a bare "empty response."
-
-The Model field in settings can be pointed at anything — the fallback chain
-still applies on top of whatever you choose. If your Groq account changes
-its model access again in the future, "Check available models" in the
-settings UI tells you what's actually available right now rather than
+token budget "thinking" before writing a final answer. Requests use the
+current `max_completion_tokens` field (not the deprecated `max_tokens`),
+set `reasoning_effort: "low"` and a hidden reasoning channel on the gpt-oss
+models so only the final answer comes back, and request strict JSON output
+(`response_format: json_object`) so the triad can be parsed reliably.
+`qwen/qwen3.6-27b` only supports `"none"`/`"default"` for
+`reasoning_effort` (not `"low"`), so that field is deliberately left unset
+for it. If your Groq account's model access changes in the future, "Check
+available models" in the settings UI (a live `GET /openai/v1/models` with
+your key) tells you what's actually available right now rather than
 requiring a code update.
 
-Both are rendered clearly labeled as AI-generated, kept in their own storage
-(the `aiNotes` IndexedDB store, one row per response, indexed by response id
-so re-asking replaces what's shown without losing the earlier note in
-storage) and their own section of the **Discoveries** page — separate from,
-and never mixed into, the deterministic evidence-gated discovery engine
-described above. The structured engine is the source of truth; the AI layer
-is informal commentary.
+## How Discoveries are calculated
 
-**The privacy tradeoff, stated plainly:** turning this on sends the text of
-each response you file (both positions, your third position, your mechanism
-tag) to Groq's API, using your own key, directly from your browser — there's
-still no backend, so nothing else changes, but your response text does now
-leave the device. Leave it off if you don't want that. The API key and the
-on/off toggle live in `localStorage` (not IndexedDB), are never included in
-JSON export, and are removable any time via "Forget saved key."
+All of the logic lives in `js/insights.js`, in one function,
+`computeInsights(checks)`, run over your full Pattern Check history
+whenever the gate trips (next milestone — 5, 12, 25, 50, 100, then every 50
+— or roughly 4 days since the last check with new data). It looks for:
+
+- **Overall accuracy** — a plain baseline stat, always reported once
+  there's enough evidence.
+- **A category you tend to miss** — a shared-logic label with 3+ attempts
+  and a notably lower hit rate than your overall average.
+- **A category you consistently spot** — the mirror: notably *higher* than
+  average, so this isn't just a list of blind spots.
+- **Evolution** — a real swing between your first-half and second-half
+  accuracy, in either direction.
+- **AI-generated vs. hand-written difficulty** — if you have 5+ attempts of
+  each and a meaningfully different hit rate, whether one source is
+  consistently harder for you.
+- **A current streak** — 5+ attempts in a row all correct or all missed,
+  reported at low confidence since short streaks happen by chance.
+
+Every insight carries an evidence count, a confidence label (`low` /
+`moderate` / `high` — never certainty), example attempts, an alternative
+(more boring, competing) explanation of the same data, and what would
+disconfirm it. Nothing is inferred from fewer than 3–5 attempts in a given
+category. Below the confirmed discoveries, a **Building Evidence** section
+shows categories with exactly 2 attempts — "one more would tip this
+either way" — recomputed live, never persisted, never claimed as a finding.
 
 ## Data, privacy, and export
 
-- All data is stored locally in this browser's IndexedDB (`js/db.js`). It is
-  never transmitted anywhere — there is no server for it to go to — unless
-  you've opted into AI Assist above.
+- All data is stored locally in this browser's IndexedDB (`js/db.js`). It
+  is never transmitted anywhere — there is no server for it to go to —
+  unless you've opted into AI Assist above.
 - **Data / Export** lets you:
-  - export a full JSON backup (responses, computed discoveries, AI notes and
-    Pattern Check attempts if any, and app metadata — never the Groq key,
-    which stays local to the browser it was entered in)
-  - export responses as CSV
+  - export a full JSON backup (every attempt, computed discoveries, and app
+    metadata — never the Groq key, which stays local to the browser it was
+    entered in)
+  - export attempts as CSV
   - import a JSON backup (this **replaces** all current local data — you're
     asked to confirm)
   - permanently delete all local data (requires typing `DELETE` to confirm)
 - Because everything is local to one browser profile, a JSON export is also
   your only way to move data between devices or browsers, or to keep a
-  backup outside the browser's storage. Note that a JSON export moves your
-  data but not your Groq key — each browser/device needs its own key entered
+  backup outside the browser's storage. A JSON export moves your data but
+  not your Groq key — each browser/device needs its own key entered
   separately if you use AI Assist there too.
 
 ## Project layout
@@ -303,16 +178,13 @@ JSON export, and are removable any time via "Forget saved key."
 ```
 index.html            app shell
 css/styles.css         all styling
-js/dilemmas.js          the dilemma bank (edit this to add dilemmas)
-js/mechanisms.js        the fixed vocabulary of "moves"
 js/db.js                 IndexedDB wrapper
-js/discovery.js          the longitudinal pattern-detection engine
-js/map.js                Contradiction Map rendering (plain SVG)
+js/oddOneOut.js          the offline fallback triad bank (edit to add triads)
+js/groq.js               optional, off-by-default AI puzzle generation (Groq)
+js/patternCheck.js       triad selection: AI first, offline bank fallback
+js/insights.js           the longitudinal pattern-detection engine
 js/exportImport.js       JSON/CSV export, JSON import
-js/groq.js               optional, off-by-default AI Assist layer (Groq)
-js/oddOneOut.js          Pattern Check's authored triad bank (edit to add triads)
-js/patternCheck.js       Pattern Check selection + scoring logic
-js/app.js                UI controller, daily-dilemma selection, all views
+js/app.js                UI controller, routing, all views
 manifest.webmanifest     PWA manifest
 service-worker.js        offline caching
 ```
@@ -322,9 +194,10 @@ No build tools, no package manager, no dependencies. Open it and it runs.
 ## What this deliberately does not do
 
 - No AI, no API calls of any kind, during normal use — the one opt-in,
-  off-by-default exception (Groq-powered AI Assist) is described above and
-  never activates without you pasting in your own key.
+  off-by-default exception (Groq-powered puzzle generation) is described
+  above and never activates without you pasting in your own key.
 - No login, no account, no cloud sync.
 - No personality score, no single trait label, no "you are an X person."
-  If your behavior differs by domain, the app is built to say so plainly
-  rather than average it into one number.
+  If your accuracy genuinely differs by category or changes over time, the
+  app is built to say so plainly, with the evidence stated, rather than
+  average it into one number.

@@ -1,25 +1,24 @@
 /*
-  THE THIRD POSITION — Pattern Check: odd-one-out bank
-  -----------------------------------------------------
-  A different activity from the daily dilemma: three short stances, two of
-  which share a real underlying logic and one of which doesn't. The task is
-  to spot the odd one out — diagnosis instead of synthesis.
+  THE THIRD POSITION — Pattern Check offline fallback bank
+  ---------------------------------------------------------
+  This is the always-available content: three short stances, two of which
+  share a real underlying logic and one of which doesn't. It's used whenever
+  AI generation (js/groq.js, generateAITriad) is off, fails, or hasn't been
+  set up — so the app is never dependent on a network call to function.
 
   Each entry:
-    id               unique string, stable forever (never renumber)
-    stances           exactly 3 short statements, in a fixed canonical order
-                       (the app shuffles the display order at render time —
-                       oddIndex always refers to this canonical array)
-    oddIndex          index (0-2) of the stance that does NOT share the logic
-    sharedLogic       short label for what the other two have in common
-    explanation       one sentence, shown after the pick, on why
-    relatedDilemmaId  optional — an id from js/dilemmas.js in the same family,
-                       used for "turn this into a response"
+    id             unique string, stable forever (never renumber)
+    stances        exactly 3 short statements, in a fixed canonical order
+                    (the app shuffles the display order at render time —
+                    oddIndex always refers to this canonical array)
+    oddIndex       index (0-2) of the stance that does NOT share the logic
+    sharedLogic    short label for what the other two have in common
+    explanation    one sentence, shown after the pick, on why
 
-  To add more: append objects here. The two non-odd stances must share a real
-  structural logic (reuse family-style thinking from js/dilemmas.js — intent
-  vs outcome, rule vs exception, etc.), not just similar wording or topic —
-  a good triad should still be a little hard even once you're looking for it.
+  To add more: append objects here. The two non-odd stances must share a
+  real structural logic (intent vs outcome, rule vs exception, individual
+  vs system, etc.), not just similar wording or topic — a good triad should
+  still be a little hard even once you're looking for it.
 */
 
 const ODD_ONE_OUT = [
@@ -33,7 +32,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "outcome over intent",
     explanation: "The first two judge the act by its outcome regardless of intent or method; the third judges the same correct outcome negatively because of how it was reached.",
-    relatedDilemmaId: "d016",
   },
   {
     id: "oo002",
@@ -45,7 +43,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "an exception here would collapse the rule",
     explanation: "The first two treat an exception as corrosive to the system it belongs to; the third treats an exception as harmless to the underlying structure.",
-    relatedDilemmaId: "d053",
   },
   {
     id: "oo003",
@@ -57,7 +54,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "committing now, on incomplete evidence, is the right call",
     explanation: "The first two favor acting on sufficient-but-incomplete evidence; the third favors withholding commitment until doubt is resolved.",
-    relatedDilemmaId: "d001",
   },
   {
     id: "oo004",
@@ -69,7 +65,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "blame lands on the system, not the individual",
     explanation: "The first two locate the cause in surrounding structural conditions; the third locates it squarely in the individual, with no comparable structural excuse offered.",
-    relatedDilemmaId: "d049",
   },
   {
     id: "oo005",
@@ -81,7 +76,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "care justifies overriding the other person's stated wishes",
     explanation: "The first two override stated wishes for the person's own good; the third defers to stated wishes despite the risk.",
-    relatedDilemmaId: "d007",
   },
   {
     id: "oo006",
@@ -93,7 +87,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "trust is extended by default until proven otherwise",
     explanation: "The first two extend trust by default; the third withholds trust until it's been verified.",
-    relatedDilemmaId: "d009",
   },
   {
     id: "oo007",
@@ -105,7 +98,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "commit now while explicitly keeping the door open to revise",
     explanation: "The first two pair commitment with built-in permission to revise; the third treats any later revision as proof the commitment was never genuine.",
-    relatedDilemmaId: "d042",
   },
   {
     id: "oo008",
@@ -117,7 +109,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the felt reaction is trustworthy evidence",
     explanation: "The first two treat a gut feeling as a real signal worth heeding; the third dismisses a comparable felt reaction as noise.",
-    relatedDilemmaId: "d059",
   },
   {
     id: "oo009",
@@ -129,7 +120,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the right move changes with context, not a fixed personal rule",
     explanation: "The first two calibrate behavior to context; the third applies one fixed rule across every context regardless.",
-    relatedDilemmaId: "d030",
   },
   {
     id: "oo010",
@@ -141,7 +131,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "what happened is kept separate from what it means",
     explanation: "The first two insist on keeping the bare fact and its interpretation apart; the third collapses an observed pattern straight into a confident interpretation.",
-    relatedDilemmaId: "d023",
   },
   {
     id: "oo011",
@@ -153,7 +142,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "what it's made of matters more than its history",
     explanation: "The first two judge by present function regardless of origin; the third locates the value specifically in origin and history.",
-    relatedDilemmaId: "d026",
   },
   {
     id: "oo012",
@@ -165,7 +153,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the original should be left alone, not improved",
     explanation: "The first two preserve the flawed original as-is; the third actively expects the original to be revised into something better.",
-    relatedDilemmaId: "d008",
   },
   {
     id: "oo013",
@@ -177,7 +164,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the good result came from abandoning a plan, not following one",
     explanation: "The first two credit letting go of structure; the third credits imposing structure.",
-    relatedDilemmaId: "d022",
   },
   {
     id: "oo014",
@@ -189,7 +175,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "standing by someone outweighs what's technically accurate",
     explanation: "The first two prioritize loyalty over correcting the record; the third prioritizes correcting the record over sparing the partner.",
-    relatedDilemmaId: "d010",
   },
   {
     id: "oo015",
@@ -201,7 +186,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the response is scaled to how much someone actually contributed",
     explanation: "The first two scale the response to actual contribution; the third applies a flat, uniform consequence regardless of contribution.",
-    relatedDilemmaId: "d050",
   },
   {
     id: "oo016",
@@ -213,7 +197,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the point of the rule outweighs its literal wording",
     explanation: "The first two bend the literal rule to serve the purpose behind it; the third enforces the literal wording regardless of purpose.",
-    relatedDilemmaId: "d055",
   },
   {
     id: "oo017",
@@ -225,7 +208,6 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "the same standard applies to everyone, including yourself",
     explanation: "The first two apply one standard universally, including to themselves; the third claims a personal exemption based on privileged self-knowledge.",
-    relatedDilemmaId: "d054",
   },
   {
     id: "oo018",
@@ -237,6 +219,5 @@ const ODD_ONE_OUT = [
     oddIndex: 2,
     sharedLogic: "who someone is now outweighs who they used to be",
     explanation: "The first two weight present change over the past; the third treats the past as still fully binding regardless of change.",
-    relatedDilemmaId: "d028",
   },
 ];
