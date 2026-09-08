@@ -77,16 +77,28 @@ function renderNav() {
   }
 }
 
+function renderRouteError(err) {
+  const panel = el("div", { class: "panel" });
+  panel.appendChild(el("h2", { text: "Couldn't load this view" }));
+  panel.appendChild(el("p", { class: "warning", text: err && err.message ? err.message : "Something went wrong loading local data." }));
+  panel.appendChild(el("button", { class: "btn primary", text: "Reload", onclick: () => location.reload() }));
+  return panel;
+}
+
 async function route() {
   renderNav();
   const main = $("#main");
   main.innerHTML = "";
   main.appendChild(el("div", { class: "loading", text: "…" }));
   let view;
-  if (state.view === "patterncheck") view = await renderPatternCheck();
-  else if (state.view === "archive") view = await renderArchive();
-  else if (state.view === "discoveries") view = await renderDiscoveries();
-  else if (state.view === "data") view = await renderDataView();
+  try {
+    if (state.view === "patterncheck") view = await renderPatternCheck();
+    else if (state.view === "archive") view = await renderArchive();
+    else if (state.view === "discoveries") view = await renderDiscoveries();
+    else if (state.view === "data") view = await renderDataView();
+  } catch (err) {
+    view = renderRouteError(err);
+  }
   main.innerHTML = "";
   main.appendChild(view);
 }

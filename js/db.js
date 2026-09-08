@@ -5,9 +5,26 @@ const DB_VERSION = 4;
 
 let _dbPromise = null;
 
+// indexedDB.open() with a bumped DB_VERSION never fires onsuccess *or*
+// onerror while an older-version connection is still open somewhere else
+// (another tab, or a backgrounded PWA instance) — it just hangs forever.
+// This project has bumped DB_VERSION multiple times, so an already-
+// installed instance is exactly the case that can get silently stuck.
+// onblocked plus a hard timeout turn that hang into a real, catchable
+// error instead.
+const DB_OPEN_TIMEOUT_MS = 4000;
+
 function openDB() {
   if (_dbPromise) return _dbPromise;
   _dbPromise = new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      _dbPromise = null;
+      reject(new Error("Couldn't open local storage — it's taking too long. Close any other open tabs or windows of this app (including a backgrounded installed copy) and reload."));
+    }, DB_OPEN_TIMEOUT_MS);
+
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = (e) => {
       const db = e.target.result;
@@ -27,8 +44,29 @@ function openDB() {
         db.createObjectStore("discoveries", { keyPath: "id" });
       }
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const db = req.result;
+      // Don't let this tab go on to block a *future* version bump the same way.
+      db.onversionchange = () => db.close();
+      resolve(db);
+    };
+    req.onerror = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      _dbPromise = null;
+      reject(req.error);
+    };
+    req.onblocked = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      _dbPromise = null;
+      reject(new Error("Couldn't open local storage — another open tab or window of this app (including a backgrounded installed copy) is running an older version. Close it, then reload this page."));
+    };
   });
   return _dbPromise;
 }
